@@ -10,6 +10,7 @@ from ctypes import wintypes
 from typing import Any, Callable, Protocol, Sequence
 
 from .models import CapturedFrame, Rect, WindowSnapshot
+from .taskbar import TaskbarActivationError, WeChatTaskbarActivator
 from .tray import TrayActivationError, WeChatTrayActivator
 
 
@@ -265,6 +266,8 @@ class WeChatWindowSession:
         tray_activation_enabled: bool = True,
         tray_activation_timeout: float = 3.0,
         tray_activator: WeChatTrayActivator | None = None,
+        taskbar_activator: WeChatTaskbarActivator | None = None,
+        taskbar_fallback_delay: float = 0.75,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -282,8 +285,12 @@ class WeChatWindowSession:
         self.tray_activation_enabled = bool(tray_activation_enabled)
         self.tray_activation_timeout = float(tray_activation_timeout)
         self.tray_activator = tray_activator
+        self.taskbar_activator = taskbar_activator
+        self.taskbar_fallback_delay = float(taskbar_fallback_delay)
         if not 0.1 <= self.tray_activation_timeout <= 30:
             raise ValueError("托盘唤醒等待时间必须在 0.1 到 30 秒之间。")
+        if not 0.1 <= self.taskbar_fallback_delay <= 10:
+            raise ValueError("任务栏兜底延迟必须在 0.1 到 10 秒之间。")
 
     @classmethod
     def _is_main_window(cls, title: str, class_name: str) -> bool:
@@ -314,6 +321,44 @@ class WeChatWindowSession:
                 extra={"automation_operation": "window.foreground"},
             )
             return detail
+
+    def _window_details(self, handle: int) -> dict[str, Any]:
+        """Collect bounded diagnostics without letting one Win32 read fail all."""
+
+        details: dict[str, Any] = {"handle": int(handle)}
+        readers: tuple[tuple[str, Callable[[int], Any]], ...] = (
+            ("title", self.api.title),
+            ("class_name", self.api.class_name),
+            ("process_id", self.api.process_id),
+            ("visible", self.api.is_visible),
+            ("minimized", self.api.is_minimized),
+            ("cloaked", self.api.is_cloaked),
+        )
+        for name, reader in readers:
+            try:
+                details[name] = reader(handle)
+            except Exception as exc:
+                details[f"{name}_error"] = type(exc).__name__
+        try:
+            bounds = self.api.window_rect(handle)
+            details["window_rect"] = [
+                bounds.left,
+                bounds.top,
+                bounds.right,
+                bounds.bottom,
+            ]
+        except Exception as exc:
+            details["window_rect_error"] = type(exc).__name__
+        return details
+
+    def _foreground_details(self) -> dict[str, Any]:
+        try:
+            handle = int(self.api.foreground() or 0)
+        except Exception as exc:
+            return {"handle": 0, "error": type(exc).__name__}
+        if not handle:
+            return {"handle": 0}
+        return self._window_details(handle)
 
     def discover(self) -> int:
         self.api.enable_per_monitor_dpi()
@@ -489,6 +534,7 @@ class WeChatWindowSession:
         if stable_for >= timeout:
             raise ValueError("窗口稳定确认时间必须小于窗口准备超时。")
         self._raise_if_cancelled(cancel_event)
+        recovered_from_tray = False
         try:
             handle = self.discover()
         except DesktopSessionError as exc:
@@ -539,11 +585,25 @@ class WeChatWindowSession:
                         self._raise_if_cancelled(cancel_event)
                 else:
                     self.sleep(0.05)
-        if self.api.is_minimized(handle):
+            recovered_from_tray = True
+        initial_window = self._window_details(handle)
+        initially_minimized = bool(initial_window.get("minimized", False))
+        taskbar_eligible = bool(
+            not recovered_from_tray
+            and initial_window.get("visible") is True
+            and initial_window.get("minimized") is False
+            and initial_window.get("cloaked") is False
+        )
+        if initially_minimized:
             self.api.restore(handle)
         last_foreground_error = self._try_set_foreground(handle)
-        deadline = self.monotonic() + timeout
-        next_foreground_retry = self.monotonic() + 0.20
+        preparation_started = self.monotonic()
+        deadline = preparation_started + timeout
+        next_foreground_retry = preparation_started + 0.20
+        taskbar_fallback_at = preparation_started + self.taskbar_fallback_delay
+        taskbar_attempted = False
+        taskbar_result: dict[str, Any] | None = None
+        taskbar_error: dict[str, Any] | None = None
         geometry_applied = False
         stable_since: float | None = None
         stable_state: tuple[Rect, Rect, int] | None = None
@@ -583,6 +643,52 @@ class WeChatWindowSession:
                         if error:
                             last_foreground_error = error
                         next_foreground_retry = now + 0.20
+                    if (
+                        taskbar_eligible
+                        and not taskbar_attempted
+                        and now >= taskbar_fallback_at
+                    ):
+                        taskbar_attempted = True
+                        remaining = max(0.1, min(2.0, deadline - now))
+                        activator = self.taskbar_activator or WeChatTaskbarActivator()
+                        try:
+                            activated = activator.activate(
+                                timeout=remaining,
+                                cancel_event=cancel_event,
+                                still_needed=lambda: self.api.foreground() != handle,
+                            )
+                            taskbar_result = {
+                                "name": activated.name,
+                                "source": activated.source,
+                                "bounds": [
+                                    activated.bounds.left,
+                                    activated.bounds.top,
+                                    activated.bounds.right,
+                                    activated.bounds.bottom,
+                                ],
+                            }
+                            log.info(
+                                "普通前台激活持续受限，已单击唯一微信任务栏按钮并继续确认前台状态。",
+                                extra={"automation_operation": "window.taskbar_fallback"},
+                            )
+                        except TaskbarActivationError as exc:
+                            if exc.code == "automation_cancelled":
+                                raise DesktopSessionError(
+                                    exc.code,
+                                    str(exc),
+                                    details=exc.details,
+                                ) from exc
+                            taskbar_error = {
+                                "code": exc.code,
+                                "message": str(exc),
+                                "details": exc.details,
+                            }
+                            log.warning(
+                                "微信任务栏兜底未完成：%s - %s",
+                                exc.code,
+                                exc,
+                                extra={"automation_operation": "window.taskbar_fallback"},
+                            )
                 else:
                     snapshot = self.snapshot()
                     if not self._is_offscreen_minimized(snapshot.window_rect):
@@ -602,15 +708,34 @@ class WeChatWindowSession:
                 stable_since = None
                 stable_state = None
             if self.monotonic() >= deadline:
+                if taskbar_eligible and taskbar_attempted:
+                    failure_message = (
+                        "微信窗口仍在桌面中，但 Windows 未允许后台程序把它切换到前台。"
+                        "程序已尝试普通窗口激活和唯一微信任务栏按钮兜底；"
+                        "为避免截错窗口，任务已停止。"
+                    )
+                else:
+                    failure_message = (
+                        "微信窗口未能稳定恢复到前台。"
+                        "为避免截错窗口，任务已停止。"
+                    )
                 raise DesktopSessionError(
                     "wechat_foreground_timeout",
-                    "微信窗口未能恢复到前台。请先手动点击一次微信窗口后重试；"
-                    "为避免截错窗口，任务已停止。",
+                    failure_message,
                     details={
                         "handle": handle,
                         "timeout": timeout,
                         "stable_for": stable_for,
                         "foreground_error": last_foreground_error,
+                        "initial_window": initial_window,
+                        "final_window": self._window_details(handle),
+                        "foreground_window": self._foreground_details(),
+                        "taskbar_fallback": {
+                            "eligible": taskbar_eligible,
+                            "attempted": taskbar_attempted,
+                            "result": taskbar_result,
+                            "error": taskbar_error,
+                        },
                     },
                 )
             if cancel_event is not None:

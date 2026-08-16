@@ -1566,6 +1566,13 @@ class BridgeService:
                             text,
                             timeout=sender.timeout,
                             settle=sender.settle,
+                            conversation_entry_mode=sender.conversation_entry_mode,
+                            conversation_enter_delay_min=(
+                                sender.conversation_enter_delay_min
+                            ),
+                            conversation_enter_delay_max=(
+                                sender.conversation_enter_delay_max
+                            ),
                             verification_timeout=sender.text_verification_timeout,
                             soft_protection=sender.soft_protection,
                             lock_mouse=sender.lock_mouse,
@@ -1812,6 +1819,15 @@ class BridgeService:
                                 resolved.path,
                                 timeout=self.config.sender.timeout,
                                 settle=self.config.sender.settle,
+                                conversation_entry_mode=(
+                                    self.config.sender.conversation_entry_mode
+                                ),
+                                conversation_enter_delay_min=(
+                                    self.config.sender.conversation_enter_delay_min
+                                ),
+                                conversation_enter_delay_max=(
+                                    self.config.sender.conversation_enter_delay_max
+                                ),
                                 soft_protection=self.config.sender.soft_protection,
                                 lock_mouse=self.config.sender.lock_mouse,
                                 lock_keyboard=self.config.sender.lock_keyboard,
@@ -2894,8 +2910,12 @@ class BridgeService:
             ("find.微信搜索框", 30, "定位微信搜索框"),
             ("click.search_box", 38, "点击微信搜索框"),
             ("input.type_search_name", 46, "输入会话名称"),
-            ("find.search_result", 54, "等待搜索结果"),
-            ("click.search_result", 61, "进入目标会话"),
+            ("wait.search_settle", 52, "等待搜索结果刷新"),
+            ("input.search_shortcut_up", 56, "选择搜索结果"),
+            ("wait.search_shortcut_confirm", 58, "等待快捷键确认"),
+            ("input.search_shortcut_enter", 61, "进入目标会话"),
+            ("find.search_result", 54, "备用方案定位搜索结果"),
+            ("click.search_result", 61, "备用鼠标方式进入会话"),
             ("find.聊天输入区域", 70, "定位聊天输入区"),
             ("click.chat_input", 76, "点击聊天输入区"),
             ("input.", 82, "写入消息内容"),
@@ -3739,6 +3759,13 @@ class BridgeService:
                 "sender": {
                     "timeout": sender.timeout,
                     "settle": sender.settle,
+                    "conversation_entry_mode": sender.conversation_entry_mode,
+                    "conversation_enter_delay_min": (
+                        sender.conversation_enter_delay_min
+                    ),
+                    "conversation_enter_delay_max": (
+                        sender.conversation_enter_delay_max
+                    ),
                     "text_verification_timeout": sender.text_verification_timeout,
                     "media_verification_mode": sender.media_verification_mode,
                     "soft_protection": sender.soft_protection,
@@ -3784,6 +3811,21 @@ class BridgeService:
                 "schema": {
                     "timeout": {"type": "number", "minimum": 0.001, "maximum": 120},
                     "settle": {"type": "number", "minimum": 0, "maximum": 10},
+                    "conversation_entry_mode": {
+                        "type": "string",
+                        "enum": ["keyboard_shortcut", "mouse_click_unstable"],
+                        "default": "keyboard_shortcut",
+                    },
+                    "conversation_enter_delay_min": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10,
+                    },
+                    "conversation_enter_delay_max": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10,
+                    },
                     "text_verification_timeout": {
                         "type": "number",
                         "minimum": 0,
@@ -3869,6 +3911,9 @@ class BridgeService:
         allowed = {
             "timeout",
             "settle",
+            "conversation_entry_mode",
+            "conversation_enter_delay_min",
+            "conversation_enter_delay_max",
             "text_verification_timeout",
             "media_verification_mode",
             "soft_protection",
@@ -3938,6 +3983,8 @@ class BridgeService:
         number_fields = {
             "timeout",
             "settle",
+            "conversation_enter_delay_min",
+            "conversation_enter_delay_max",
             "text_verification_timeout",
             "min_reply_delay",
             "click_before_delay_min",
@@ -3972,7 +4019,12 @@ class BridgeService:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     raise ProtocolError("invalid_setting_type", f"{key} must be numeric.")
                 changes[key] = float(value)
-            elif key in {"media_verification_mode", "mention_mode", "input_mode"}:
+            elif key in {
+                "media_verification_mode",
+                "mention_mode",
+                "input_mode",
+                "conversation_entry_mode",
+            }:
                 changes[key] = str(value or "").strip().lower()
             elif key == "wechat_executable":
                 changes[key] = str(value or "").strip()

@@ -261,6 +261,9 @@ def send_message(
     *,
     timeout: float = 8.0,
     settle: float = 0.35,
+    conversation_entry_mode: str = "keyboard_shortcut",
+    conversation_enter_delay_min: float = 0.20,
+    conversation_enter_delay_max: float = 0.50,
     verification_timeout: float = 0.0,
     soft_protection: bool = True,
     lock_mouse: bool = False,
@@ -363,6 +366,11 @@ def send_message(
         settings = DesktopMessageSettings(
             locate_timeout=float(timeout),
             settle=float(settle),
+            conversation_entry_mode=str(
+                conversation_entry_mode or "keyboard_shortcut"
+            ).strip().lower(),
+            conversation_enter_delay_min=float(conversation_enter_delay_min),
+            conversation_enter_delay_max=float(conversation_enter_delay_max),
             character_delay=float(character_delay),
             character_delay_min=delay_min,
             character_delay_max=delay_max,

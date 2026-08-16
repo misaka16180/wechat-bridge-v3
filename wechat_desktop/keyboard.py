@@ -199,6 +199,9 @@ class Win32KeyboardBackend:
     def enter(self) -> None:
         self.press_key(0x0D)  # VK_RETURN
 
+    def up(self) -> None:
+        self.press_key(0x26)  # VK_UP
+
     def backspace(self) -> None:
         self.press_key(0x08)  # VK_BACK
 

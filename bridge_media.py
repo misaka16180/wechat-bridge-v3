@@ -341,6 +341,9 @@ def send_media(
     *,
     timeout: float = 8.0,
     settle: float = 0.35,
+    conversation_entry_mode: str = "keyboard_shortcut",
+    conversation_enter_delay_min: float = 0.20,
+    conversation_enter_delay_max: float = 0.50,
     soft_protection: bool = True,
     lock_mouse: bool = False,
     lock_keyboard: bool = False,
@@ -402,6 +405,11 @@ def send_media(
         settings = DesktopMessageSettings(
             locate_timeout=float(timeout),
             settle=float(settle),
+            conversation_entry_mode=str(
+                conversation_entry_mode or "keyboard_shortcut"
+            ).strip().lower(),
+            conversation_enter_delay_min=float(conversation_enter_delay_min),
+            conversation_enter_delay_max=float(conversation_enter_delay_max),
             input_mode="clipboard",
             layout_cache=bool(layout_cache),
             click_before_delay_min=float(click_before_delay_min),

@@ -22,6 +22,39 @@ from .models import Rect
 log = logging.getLogger("wechat_automation.tray")
 
 
+TASKBAR_BUTTON_CLASSES = {
+    "Taskbar.TaskListButtonAutomationPeer",
+    "Taskbar.TaskListLabeledButtonAutomationPeer",
+}
+
+
+def is_taskbar_button_source(source: str) -> bool:
+    """Return true only for explicit Windows task-list button UIA classes."""
+
+    class_name = str(source or "").rsplit(":", 1)[-1].strip()
+    return class_name in TASKBAR_BUTTON_CLASSES
+
+
+def is_wechat_shell_name(name: str) -> bool:
+    """Match WeChat shell labels without accepting similarly named software."""
+
+    compact = " ".join(str(name or "").split()).strip()
+    if compact == "微信":
+        return True
+    if compact.startswith("微信"):
+        suffix = compact[2:3]
+        return not suffix or suffix in " -–—:：([（【\r\n"
+    folded = compact.casefold()
+    for prefix in ("wechat", "weixin"):
+        if folded == prefix:
+            return True
+        if folded.startswith(prefix) and folded[len(prefix) : len(prefix) + 1] in {
+            " ", "-", "–", "—", ":", "(", "["
+        }:
+            return True
+    return False
+
+
 class TrayActivationError(RuntimeError):
     def __init__(self, code: str, message: str, *, details: dict[str, Any] | None = None):
         super().__init__(message)
@@ -463,21 +496,7 @@ class WeChatTrayActivator:
 
     @staticmethod
     def _is_wechat_name(name: str) -> bool:
-        compact = " ".join(str(name or "").split()).strip()
-        if compact == "微信":
-            return True
-        if compact.startswith("微信"):
-            suffix = compact[2:3]
-            return not suffix or suffix in " -–—:：([（【\r\n"
-        folded = compact.casefold()
-        for prefix in ("wechat", "weixin"):
-            if folded == prefix:
-                return True
-            if folded.startswith(prefix) and folded[len(prefix) : len(prefix) + 1] in {
-                " ", "-", "–", "—", ":", "(", "["
-            }:
-                return True
-        return False
+        return is_wechat_shell_name(name)
 
     @staticmethod
     def _is_overflow_button(name: str) -> bool:
@@ -504,7 +523,18 @@ class WeChatTrayActivator:
         return list(unique.values())
 
     def _wechat_candidates(self, nodes: Sequence[TrayNode]) -> list[TrayNode]:
-        return self._dedupe([node for node in nodes if self._is_wechat_name(node.name)])
+        # Shell_TrayWnd contains both the notification area and the task list.
+        # A task-list button toggles a visible window and must never be treated
+        # as a notification-area icon: doing so can minimize WeChat instead of
+        # restoring it.
+        return self._dedupe(
+            [
+                node
+                for node in nodes
+                if self._is_wechat_name(node.name)
+                and not is_taskbar_button_source(node.source)
+            ]
+        )
 
     @staticmethod
     def _candidate_details(candidates: Sequence[TrayNode]) -> list[dict[str, Any]]:

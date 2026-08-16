@@ -34,6 +34,9 @@ EDITABLE_PROFILE_NAMES = ("custom",)
 DEFAULT_SENDER_SETTINGS: dict[str, Any] = {
     "timeout": 8,
     "settle": 0.35,
+    "conversation_entry_mode": "keyboard_shortcut",
+    "conversation_enter_delay_min": 0.20,
+    "conversation_enter_delay_max": 0.50,
     "text_verification_timeout": 0,
     "media_verification_mode": "none",
     "soft_protection": True,
@@ -426,6 +429,9 @@ class ActiveApiConfig:
 class SenderConfig:
     timeout: float = 8.0
     settle: float = 0.5
+    conversation_entry_mode: str = "keyboard_shortcut"
+    conversation_enter_delay_min: float = 0.20
+    conversation_enter_delay_max: float = 0.50
     text_verification_timeout: float = 3.0
     media_verification_mode: str = "none"
     soft_protection: bool = True
@@ -552,6 +558,20 @@ class BridgeConfig:
             raise ConfigError("WeFlow reconnect 至少 1 秒。")
         if self.sender.timeout <= 0 or self.sender.settle < 0:
             raise ConfigError("sender.timeout 必须大于 0，sender.settle 不能为负数。")
+        if self.sender.conversation_entry_mode not in {
+            "keyboard_shortcut",
+            "mouse_click_unstable",
+        }:
+            raise ConfigError(
+                "sender.conversation_entry_mode 只能是 keyboard_shortcut 或 mouse_click_unstable。"
+            )
+        if not (
+            0
+            <= self.sender.conversation_enter_delay_min
+            <= self.sender.conversation_enter_delay_max
+            <= 10
+        ):
+            raise ConfigError("按上方向键后等待时间必须设置在 0..10 秒，且最短值不能大于最长值。")
         if not 0 <= self.sender.text_verification_timeout <= 30:
             raise ConfigError(
                 "sender.text_verification_timeout must be between 0 and 30 seconds."
@@ -840,6 +860,16 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
         sender=SenderConfig(
             timeout=float(sender_raw.get("timeout", 8)),
             settle=float(sender_raw.get("settle", 0.5)),
+            conversation_entry_mode=str(
+                sender_raw.get("conversation_entry_mode", "keyboard_shortcut")
+                or "keyboard_shortcut"
+            ).strip().lower(),
+            conversation_enter_delay_min=float(
+                sender_raw.get("conversation_enter_delay_min", 0.20)
+            ),
+            conversation_enter_delay_max=float(
+                sender_raw.get("conversation_enter_delay_max", 0.50)
+            ),
             text_verification_timeout=float(
                 sender_raw.get("text_verification_timeout", 3)
             ),

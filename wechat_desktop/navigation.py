@@ -149,7 +149,11 @@ class NoSendSearchNavigator:
                 "会话类型只能是私聊或群聊。",
             )
         states = ["IDLE"]
-        self.session.prepare(timeout=timeout, cancel_event=cancel_event)
+        self.session.prepare(
+            timeout=timeout,
+            stable_for=0.15,
+            cancel_event=cancel_event,
+        )
         states.append("WINDOW_READY")
 
         self.search_input.open_search(cancel_event=cancel_event)

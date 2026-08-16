@@ -94,6 +94,7 @@ class KeyboardLike(Protocol):
     def ctrl_a(self) -> None: ...
     def backspace(self) -> None: ...
     def enter(self) -> None: ...
+    def up(self) -> None: ...
     def ctrl_v(self) -> None: ...
     def type_text(self, text: str, **kwargs: Any) -> None: ...
 
@@ -124,6 +125,9 @@ def _enabled_send_button_with_toolbar(result: RelativeLocatorResult) -> bool:
 class DesktopMessageSettings:
     locate_timeout: float = 8.0
     settle: float = 0.35
+    conversation_entry_mode: str = "keyboard_shortcut"
+    conversation_enter_delay_min: float = 0.20
+    conversation_enter_delay_max: float = 0.50
     character_delay: float = 0.03
     character_delay_min: float = 0.02
     character_delay_max: float = 0.06
@@ -172,6 +176,22 @@ class DesktopMessageSettings:
             raise ValueError("DPI 自动扫描间隔必须在 1% 到 50% 之间。")
         if not 0 <= self.settle <= 10:
             raise ValueError("界面稳定等待必须在 0 到 10 秒之间。")
+        if self.conversation_entry_mode not in {
+            "keyboard_shortcut",
+            "mouse_click_unstable",
+        }:
+            raise ValueError(
+                "进入会话方式只能是 keyboard_shortcut 或 mouse_click_unstable。"
+            )
+        if not (
+            0
+            <= self.conversation_enter_delay_min
+            <= self.conversation_enter_delay_max
+            <= 10
+        ):
+            raise ValueError(
+                "按上方向键后等待时间必须设置在 0 到 10 秒之间，且最长值不能小于最短值。"
+            )
         if not 0 <= self.character_delay <= 2:
             raise ValueError("旧版逐字间隔必须在 0 到 2 秒之间。")
         if not (
@@ -1007,6 +1027,39 @@ class VisualDesktopMessageSender:
             raise
         self.trace.end(operation, "等待结束", started)
 
+    def _wait_random_traced(
+        self,
+        operation: str,
+        minimum: float,
+        maximum: float,
+        *,
+        cancel_event: threading.Event | None,
+    ) -> float:
+        started = self.trace.begin(
+            operation,
+            f"随机等待开始：{minimum:.3f}–{maximum:.3f} 秒",
+        )
+        try:
+            duration = self.interaction.wait_random(
+                minimum,
+                maximum,
+                cancel_event=cancel_event,
+            )
+        except Exception as exc:
+            self.trace.end(
+                operation,
+                f"随机等待失败：{type(exc).__name__}: {exc}",
+                started,
+                level=logging.ERROR,
+            )
+            raise
+        self.trace.end(
+            operation,
+            f"随机等待结束：实际等待 {duration:.3f} 秒",
+            started,
+        )
+        return duration
+
     def _wait_search_result(
         self,
         *,
@@ -1264,22 +1317,53 @@ class VisualDesktopMessageSender:
             "会话名称输入完成",
             lambda: self._type(self.keyboard, target_name, cancel_event),
         )
-        result_frame, result = self._wait_search_result(
-            timeout=self.settings.locate_timeout,
-            minimum_wait=self.settings.settle,
-            cancel_event=cancel_event,
-            base=search,
-            base_image_size=frame.image.size,
-        )
-        self._call_traced(
-            "click.search_result",
-            "点击第一条搜索结果（包含鼠标移动、点击前停顿与点击后随机等待）",
-            "第一条搜索结果点击完成",
-            lambda: self.interaction.click_rect(
-                self._screen_rect(result_frame, result.click_bounds),
+        if self.settings.conversation_entry_mode == "keyboard_shortcut":
+            self._wait_interruptible(
+                "wait.search_settle",
+                self.settings.settle,
                 cancel_event=cancel_event,
-            ),
-        )
+            )
+            self._call_traced(
+                "input.search_shortcut_up",
+                "按一次上方向键选择微信搜索结果",
+                "上方向键已执行",
+                self.keyboard.up,
+            )
+            states.append("SEARCH_SHORTCUT_UP")
+            self._wait_random_traced(
+                "wait.search_shortcut_confirm",
+                self.settings.conversation_enter_delay_min,
+                self.settings.conversation_enter_delay_max,
+                cancel_event=cancel_event,
+            )
+            self._call_traced(
+                "input.search_shortcut_enter",
+                "按一次 Enter 进入所选会话",
+                "Enter 已执行，等待聊天输入区出现",
+                self.keyboard.enter,
+            )
+            states.append("SEARCH_SHORTCUT_ENTER")
+        else:
+            result_frame, result = self._wait_search_result(
+                timeout=self.settings.locate_timeout,
+                minimum_wait=self.settings.settle,
+                cancel_event=cancel_event,
+                base=search,
+                base_image_size=frame.image.size,
+            )
+            self._call_traced(
+                "click.search_result",
+                (
+                    "使用不稳定备用方案：点击推算出的第一条搜索结果"
+                    "（包含鼠标移动、点击前停顿与点击后随机等待）"
+                ),
+                "备用鼠标点击已完成",
+                lambda: self.interaction.click_rect(
+                    self._screen_rect(result_frame, result.click_bounds),
+                    cancel_event=cancel_event,
+                ),
+            )
+            states.append("SEARCH_RESULT_MOUSE_CLICKED_UNSTABLE")
         chat_frame, chat = self._wait_relative(
             self.chat_input,
             timeout=self.settings.locate_timeout,
@@ -1405,6 +1489,7 @@ class VisualDesktopMessageSender:
             "微信窗口已准备就绪",
             lambda: self.session.prepare(
                 timeout=self.settings.locate_timeout,
+                stable_for=0.15,
                 cancel_event=cancel_event,
             ),
         )
@@ -1597,6 +1682,7 @@ class VisualDesktopMessageSender:
             "微信窗口已准备就绪",
             lambda: self.session.prepare(
                 timeout=self.settings.locate_timeout,
+                stable_for=0.15,
                 cancel_event=cancel_event,
             ),
         )
