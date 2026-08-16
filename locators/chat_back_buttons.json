@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "id": "locate_chat_back_buttons",
+  "theme": "light",
+  "description": "窄聊天层顶部的返回按钮；只有同时确认聊天工具栏与发送按钮后才允许点击",
+  "roi": [0.0, 0.0, 1.0, 0.18],
+  "max_candidates": 8,
+  "templates": [
+    {
+      "path": "../templates/light/anchors/back_button/back_default.png",
+      "minimum_score": 0.985,
+      "coarse_step": 3
+    },
+    {
+      "path": "../templates/light/anchors/back_button/back_hover.png",
+      "minimum_score": 0.985,
+      "coarse_step": 3
+    }
+  ]
+}

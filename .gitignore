@@ -1,0 +1,29 @@
+# Python and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Machine-local runtime selection, configuration and credentials
+.runtime-python.txt*
+bridge_config.json
+bridge_state.json
+bridge_state.json.tmp
+
+# Runtime media, logs and visual diagnostics
+.bridge_media/
+offline-packages/
+logs/
+local_calibration/
+reports/
+artifacts/
+debug/
+dist/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

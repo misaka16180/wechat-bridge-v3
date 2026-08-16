@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "id": "locate_chat_input_by_toolbar",
+  "theme": "light",
+  "description": "仅在浅色模式下，通过发送按钮和表情按钮共同定位发送按钮正上方的稳定输入区域",
+  "click": {
+    "description": "在推算区域内部横纵各保留 20% 边距后随机点击",
+    "x_fraction": [0.20, 0.80],
+    "y_fraction": [0.20, 0.80]
+  },
+  "anchors": {
+    "send_button": {
+      "description": "聊天窗口右下区域的启用或禁用状态发送按钮；保留所有图像候选，再与表情按钮和窗口边缘组合筛选",
+      "roi": [0.45, 0.72, 1.00, 1.00],
+      "templates": [
+        {"path": "../templates/light/anchors/send_button/send_enabled.png", "minimum_score": 0.97, "minimum_margin": 0.02, "coarse_step": 2},
+        {"path": "../templates/light/anchors/send_button/send_disabled.png", "minimum_score": 0.97, "minimum_margin": 0.02, "coarse_step": 2},
+        {"path": "../templates/light/anchors/send_button/send_disabled_native_125.png", "native_scale": 1.25, "minimum_score": 0.97, "minimum_margin": 0.02, "coarse_step": 2}
+      ]
+    },
+    "emoji_button": {
+      "description": "输入区底部工具栏最左侧的表情按钮",
+      "roi": [0.05, 0.72, 0.55, 1.00],
+      "templates": [
+        {"path": "../templates/light/anchors/emoji_button/emoji_19x21.png", "minimum_score": 0.97, "minimum_margin": 0.02, "coarse_step": 2},
+        {"path": "../templates/light/anchors/emoji_button/emoji_28x27.png", "minimum_score": 0.95, "minimum_margin": 0.02, "coarse_step": 2}
+      ]
+    }
+  },
+  "alternatives": [
+    {
+      "id": "send_button_plus_emoji_button",
+      "anchors": ["send_button", "emoji_button"],
+      "target": {
+        "left": {"anchor": "send_button", "reference": "left", "offset": 6},
+        "top": {"anchor": "send_button", "reference": "top", "offset": -39},
+        "right": {"anchor": "send_button", "reference": "right", "offset": -12},
+        "bottom": {"anchor": "send_button", "reference": "top", "offset": -15}
+      },
+      "constraints": [
+        {
+          "description": "发送按钮与表情按钮必须处在同一条工具栏上",
+          "left": {"source": "send_button", "reference": "center_y"},
+          "right": {"source": "emoji_button", "reference": "center_y"},
+          "min_difference": -2,
+          "max_difference": 2
+        },
+        {
+          "description": "发送按钮必须明显位于表情按钮右侧",
+          "left": {"source": "send_button", "reference": "center_x"},
+          "right": {"source": "emoji_button", "reference": "center_x"},
+          "min_difference": 60,
+          "max_difference": 2000
+        },
+        {
+          "description": "发送按钮右边缘必须靠近微信窗口右边缘",
+          "left": {"source": "image", "reference": "right"},
+          "right": {"source": "send_button", "reference": "right"},
+          "min_difference": 20,
+          "max_difference": 28
+        },
+        {
+          "description": "发送按钮下边缘必须靠近微信窗口下边缘",
+          "left": {"source": "image", "reference": "bottom"},
+          "right": {"source": "send_button", "reference": "bottom"},
+          "min_difference": 18,
+          "max_difference": 26
+        }
+      ],
+      "bounds": {
+        "min_width": 30,
+        "max_width": 60,
+        "min_height": 20,
+        "max_height": 32
+      }
+    }
+  ]
+}
