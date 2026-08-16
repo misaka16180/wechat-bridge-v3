@@ -320,7 +320,16 @@ class WeChatWindowSession:
         candidates: list[int] = []
         for handle in self.api.enum_windows():
             try:
-                if not self.api.is_visible(handle) or self.api.is_cloaked(handle):
+                # A taskbar-minimized WeChat HWND can temporarily report
+                # IsWindowVisible=False while IsIconic=True. It is still the
+                # safest recovery target and must be restored before falling
+                # back to notification-area automation. Hidden, non-minimized
+                # helper windows remain excluded.
+                minimized = self.api.is_minimized(handle)
+                if (
+                    (not self.api.is_visible(handle) and not minimized)
+                    or self.api.is_cloaked(handle)
+                ):
                     continue
                 if self._is_main_window(
                     self.api.title(handle),
@@ -332,7 +341,7 @@ class WeChatWindowSession:
         if not candidates:
             raise DesktopSessionError(
                 "wechat_not_found",
-                "没有找到可见的微信主窗口。请先启动并登录 Windows 桌面微信。",
+                "没有找到可恢复的微信主窗口。请先启动并登录 Windows 桌面微信。",
             )
         unique = sorted(set(candidates))
         if len(unique) != 1:
@@ -489,7 +498,7 @@ class WeChatWindowSession:
                 raise DesktopSessionError(
                     "wechat_not_found",
                     (
-                        "没有找到可见的微信主窗口，且“从系统托盘唤醒微信”未开启。"
+                        "没有找到可恢复的微信主窗口，且“从通知区域唤醒微信”未开启。"
                         "请先恢复微信窗口，或在自动化配置的全局运行环境中开启该选项。"
                     ),
                 ) from exc

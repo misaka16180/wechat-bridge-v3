@@ -8,7 +8,7 @@ v3 提供一个与 WeFlow/AstrBot 独立的机器调用入口。它不会等待�
 
 - 配置了 Token：请求必须带 `Authorization: Bearer <API_TOKEN>`。
 - Token 留空：只允许本机回环地址调用；即使控制台监听局域网，也不会接受远程无 Token 请求。
-- API 是否启用、Token 是否配置与 AstrBot/WeFlow 连接状态互不影响，但微信自动化和桥接服务停止时不会创建新的发送任务。
+- API 是否启用、Token 是否配置与 AstrBot/WeFlow 连接状态互不影响。主动发送 API 不要求启动桥接服务；只要本地网页控制台仍在运行、主动 API 已启用且微信自动化已启动，就可以创建和执行发送任务。停止桥接只断开 WeFlow/AstrBot 链路，不会取消主动 API 队列；停止微信自动化才会拒绝新任务并取消尚未提交的任务。
 
 默认接口地址为：`http://127.0.0.1:8765/api/v1/messages`。若控制台启用了 HTTPS，应使用 `https`。
 

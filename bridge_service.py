@@ -405,10 +405,10 @@ class BridgeService:
         with self._debug_lock:
             pending_uploads = list(self._debug_uploads.values())
             self._debug_uploads.clear()
-        self._cancel_active_api_tasks(
-            reason="service_stopped",
-            message="桥接服务已停止，主动发送任务已取消。",
-        )
+        # The proactive Agent API is a sibling of the WeFlow/AstrBot bridge,
+        # not one of its transports. Stopping the bridge must leave its queue
+        # and desktop worker alone. Only stop_automation() (or an explicit
+        # per-task cancellation) is allowed to cancel those tasks.
         for upload in pending_uploads:
             self._remove_debug_upload(upload)
         self._event("info", "bridge_stopped", "v3 桥接已停止。")
@@ -2711,10 +2711,7 @@ class BridgeService:
         if not isinstance(payload, dict):
             raise ProtocolError("invalid_request", "请求 JSON 必须是对象。")
         with self._state_lock:
-            running = self._running
             automation_enabled = self._automation_enabled
-        if not running:
-            raise ProtocolError("service_stopped", "桥接服务已停止，未创建发送任务。")
         if not automation_enabled:
             raise ProtocolError("automation_stopped", "微信自动化已停止，未创建发送任务。")
         if not self.config.active_api.enabled:

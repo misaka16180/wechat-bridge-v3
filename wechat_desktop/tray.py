@@ -603,7 +603,11 @@ class WeChatTrayActivator:
         if candidate is None:
             raise TrayActivationError(
                 "wechat_tray_icon_not_found",
-                "没有在系统托盘中找到唯一的微信图标。请确认微信已登录并缩到托盘。",
+                (
+                    "未找到可恢复的微信窗口，也未在 Windows 通知区域找到唯一微信图标。"
+                    "请确认电脑端微信已启动并登录；若微信仍显示在任务栏，请先手动恢复一次，"
+                    "若已缩到通知区域，请确认微信图标可见。"
+                ),
             )
         self._cancelled(cancel_event)
         try:

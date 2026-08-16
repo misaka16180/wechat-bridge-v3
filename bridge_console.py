@@ -448,7 +448,10 @@ class BridgeConsole:
             "endpoint": f"{scheme}://{host}:{config.console.port}/api/v1/messages",
             "status_endpoint": f"{scheme}://{host}:{config.console.port}/api/v1/messages/{{task_id}}",
             "local_only_without_token": not bool(active_api.token),
-            "description": "Agent 主动提交文字、图片或文件；提交后轮询任务状态，request_id 用于防止网络重试造成重复发送。",
+            "bridge_required": False,
+            "automation_required": True,
+            "automation_enabled": bool(self.service.status()["automation_enabled"]),
+            "description": "Agent 主动提交文字、图片或文件；不要求启动 WeFlow/AstrBot 桥接，但微信自动化必须开启。提交后轮询任务状态，request_id 用于防止网络重试造成重复发送。",
         }
 
     def _save_active_api(self, body: dict[str, Any]) -> dict[str, Any]:

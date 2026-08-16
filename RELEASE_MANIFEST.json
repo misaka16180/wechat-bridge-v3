@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "product": "WeChat Bridge v3",
-  "version": "3.0.0-rc.10",
+  "version": "3.0.0-rc.11",
   "status": "release-candidate",
   "file_count": 68,
   "files": [
@@ -17,13 +17,13 @@
     },
     {
       "path": "bridge_console.py",
-      "size": 67375,
-      "sha256": "dead9d39a387cbe6292dca0f6eea24bf70cba22d129b4fbd0c424a3b4682f866"
+      "size": 67612,
+      "sha256": "42a4bd34b6a256b137a254de357c993542a40f2ea02da2471896b9f1d5e91300"
     },
     {
       "path": "bridge_console_page.py",
-      "size": 275090,
-      "sha256": "748f37add21a4316d429877f4c3fc63046b4e767f507a3b67d2fc2af27c80c30"
+      "size": 275900,
+      "sha256": "38fc6ee6518eaf131f1e9faee57a494e9ded8bf07fd52f4296e57019e4f0cf3f"
     },
     {
       "path": "bridge_logging.py",
@@ -52,8 +52,8 @@
     },
     {
       "path": "bridge_service.py",
-      "size": 175568,
-      "sha256": "1908f7aee6ef45de044ae222814014008dba3f186ab66b660c86c4de0fb47e93"
+      "size": 175537,
+      "sha256": "84996c02307d53ae9184c2aac762486cc24354a3c4d4fbdcff3fc461692120e4"
     },
     {
       "path": "bridge_weflow.py",
@@ -208,7 +208,7 @@
     {
       "path": "v3_version.py",
       "size": 171,
-      "sha256": "49526b3ee94284a3434c9ca90aac42ab10869901b0a187d0035840b435a989bc"
+      "sha256": "243c9b6c871d36d153a904e7ec8bb36bb91499b2b473d00fb0840605ad395756"
     },
     {
       "path": "wechat_bridge_v3.py",
@@ -297,8 +297,8 @@
     },
     {
       "path": "wechat_desktop/session.py",
-      "size": 26550,
-      "sha256": "80940db4b57a6d1003830bf0bc9614c3d46db5dd9d556b5b730d891f5fabbe7c"
+      "size": 27049,
+      "sha256": "613fc96cc1a1772909a5bad8f4aa4d8798f994f2bbb554f42b8f4b8db3755bd8"
     },
     {
       "path": "wechat_desktop/template_matching.py",
@@ -307,8 +307,8 @@
     },
     {
       "path": "wechat_desktop/tray.py",
-      "size": 24725,
-      "sha256": "ae454edb2fbbb626728b2da429fc6a212064971395b884060559a105226affcf"
+      "size": 24970,
+      "sha256": "a44fd080f8bbc7a944f7b324de7571d143a5256468e4eac7baf032278a63e1fd"
     },
     {
       "path": "wechat_desktop/visual_compatibility.py",
@@ -327,23 +327,23 @@
     },
     {
       "path": "主动发送API.md",
-      "size": 4394,
-      "sha256": "9306a567f2d2e8d9e16ed625905a1dc0c2df383d6f87bd1c3afbe7bc727707e4"
+      "size": 4650,
+      "sha256": "a8e784f270de2ca2c4163fdafc1643e00310d2187d3ea2a26c2546c5a8226a7d"
     },
     {
       "path": "使用说明.md",
-      "size": 13686,
-      "sha256": "4ad83c4ab62d02fa184189ac1122e9d026f957ccf4c248eb2ee64d45bef401bd"
+      "size": 13855,
+      "sha256": "b366fbe10ecaaa7ff57867adfabc9a69aaeb345fefe626767a96998ba279b907"
     },
     {
       "path": "现场验收清单.md",
       "size": 8122,
-      "sha256": "bee086d042fd88b63ae53056dfc63fd69d11d1db2e39e80a0c9cc07dd56dca96"
+      "sha256": "4820f2e6168b596642191ede308d1578f0b582dd2c3d2de13f8e24910fa9f22c"
     },
     {
       "path": "离线依赖与整合版说明.md",
-      "size": 2220,
-      "sha256": "27c35662d812722dceaab62c2d396ee42be22c71b95f987599965fcf2288002b"
+      "size": 2982,
+      "sha256": "d446c4738181a0c50ee03f1a282a3e2efdd12d377af80ed58570b39699245b45"
     }
   ]
 }
