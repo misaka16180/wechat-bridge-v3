@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hmac
 import copy
+import html
 import ipaddress
 import json
 import logging
@@ -40,6 +41,49 @@ from wechat_qt_accessibility import QT_HOT_ACTIVATION_NOTICE_VERSION
 
 log = logging.getLogger("wechat_bridge.console")
 MAX_BODY_BYTES = 64 * 1024
+ACTIVE_API_DOCUMENT = Path(__file__).resolve().with_name("主动发送API.md")
+
+
+def active_api_document_page(markdown: str) -> str:
+    """Wrap the canonical Markdown in an Agent-readable public HTML page.
+
+    The document is static product content.  It deliberately contains no live
+    config, token, task or log data; public access is still disabled by default
+    and must be explicitly enabled in the management console.
+    """
+
+    source = html.escape(markdown)
+    return f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>主动发送 API · Agent 接入说明</title>
+  <style>
+    :root{{--ink:#16273d;--muted:#60748d;--line:#dce6f1}}
+    *{{box-sizing:border-box}}
+    body{{margin:0;color:var(--ink);background:#f4f8fc;font-family:Inter,"Segoe UI","Microsoft YaHei",sans-serif}}
+    header{{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:17px max(24px,calc((100vw - 1100px)/2));border-bottom:1px solid var(--line);background:#ffffffed;backdrop-filter:blur(12px)}}
+    header b{{font-size:17px}} header span{{display:block;margin-top:3px;color:var(--muted);font-size:11px}}
+    nav{{display:flex;gap:8px;flex-wrap:wrap}} a{{padding:8px 11px;border:1px solid #bfd3e7;border-radius:9px;color:#27699d;background:#fff;text-decoration:none;font-size:12px;font-weight:700}}
+    main{{width:min(1100px,calc(100% - 32px));margin:22px auto 42px;padding:28px 30px;border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:0 18px 46px #17395d12}}
+    .notice{{margin-bottom:18px;padding:11px 13px;border:1px solid #bcdcf0;border-radius:10px;color:#315c7b;background:#eff8fd;font-size:12px;line-height:1.6}}
+    pre{{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.72 "Cascadia Code",Consolas,"Microsoft YaHei",monospace;tab-size:2}}
+    @media(max-width:700px){{header{{position:static;align-items:flex-start;padding:15px 16px}}main{{width:calc(100% - 20px);margin:10px auto 24px;padding:18px 16px;border-radius:12px}}pre{{font-size:12px}}}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><b>主动发送 API · Agent 接入说明</b><span>公开静态文档，不读取控制台配置，也不会显示 Token</span></div>
+    <nav><a href="/docs/active-api.md">原始 Markdown</a><a href="/">打开控制台</a></nav>
+  </header>
+  <main>
+    <div class="notice">Agent 应优先读取文档开头的“必须遵守的调用约定”。图片和文件默认先上传二进制，再用一次性 upload_id 创建任务。</div>
+    <pre id="active-api-document">{source}</pre>
+  </main>
+</body>
+</html>"""
 
 
 class ExclusiveThreadingHTTPServer(ThreadingHTTPServer):
@@ -445,8 +489,12 @@ class BridgeConsole:
         return {
             "enabled": bool(active_api.enabled),
             "token_configured": bool(active_api.token),
+            "public_docs_enabled": bool(active_api.public_docs_enabled),
             "endpoint": f"{scheme}://{host}:{config.console.port}/api/v1/messages",
+            "upload_endpoint": f"{scheme}://{host}:{config.console.port}/api/v1/uploads",
             "status_endpoint": f"{scheme}://{host}:{config.console.port}/api/v1/messages/{{task_id}}",
+            "docs_url": f"{scheme}://{host}:{config.console.port}/docs/active-api",
+            "docs_markdown_url": f"{scheme}://{host}:{config.console.port}/docs/active-api.md",
             "local_only_without_token": not bool(active_api.token),
             "bridge_required": False,
             "automation_required": True,
@@ -460,10 +508,20 @@ class BridgeConsole:
         enabled = body.get("enabled", self.service.config.active_api.enabled)
         if not isinstance(enabled, bool):
             raise ProtocolError("invalid_active_api", "enabled 必须是布尔值。")
+        public_docs_enabled = body.get(
+            "public_docs_enabled",
+            self.service.config.active_api.public_docs_enabled,
+        )
+        if not isinstance(public_docs_enabled, bool):
+            raise ProtocolError(
+                "invalid_active_api",
+                "public_docs_enabled 必须是布尔值。",
+            )
 
         def mutate(raw: dict[str, Any]) -> None:
             target = self._mapping(raw, "active_api")
             target["enabled"] = enabled
+            target["public_docs_enabled"] = public_docs_enabled
             if bool(body.get("clear_token")):
                 target["token"] = ""
             elif str(body.get("token") or ""):
@@ -998,7 +1056,10 @@ class BridgeConsole:
                 if origin:
                     self.send_header("Access-Control-Allow-Origin", origin)
                     self.send_header("Vary", "Origin")
-                self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+                self.send_header(
+                    "Access-Control-Allow-Headers",
+                    "Authorization, Content-Type, X-Media-Type, X-File-Name",
+                )
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                 self._security_headers()
                 self.end_headers()
@@ -1008,6 +1069,43 @@ class BridgeConsole:
                 path = parsed.path
                 if path == "/healthz":
                     self._json({"ok": True})
+                    return
+                if path in {"/docs/active-api", "/docs/active-api.md"}:
+                    active_api = getattr(console.service.config, "active_api", None)
+                    if active_api is None or not active_api.public_docs_enabled:
+                        self._json(
+                            {
+                                "ok": False,
+                                "error": "主动发送 API 公开文档尚未启用。",
+                                "code": "active_api_docs_disabled",
+                            },
+                            404,
+                        )
+                        return
+                    try:
+                        markdown = ACTIVE_API_DOCUMENT.read_text(encoding="utf-8")
+                    except OSError:
+                        self._json(
+                            {
+                                "ok": False,
+                                "error": "主动发送 API 文档未随当前版本安装。",
+                                "code": "active_api_document_missing",
+                            },
+                            404,
+                        )
+                        return
+                    if path.endswith(".md"):
+                        payload = markdown.encode("utf-8")
+                        content_type = "text/markdown; charset=utf-8"
+                    else:
+                        payload = active_api_document_page(markdown).encode("utf-8")
+                        content_type = "text/html; charset=utf-8"
+                    self.send_response(200)
+                    self.send_header("Content-Type", content_type)
+                    self.send_header("Content-Length", str(len(payload)))
+                    self._security_headers()
+                    self.end_headers()
+                    self.wfile.write(payload)
                     return
                 if path == "/":
                     authenticated = (
@@ -1134,6 +1232,54 @@ class BridgeConsole:
                             console.service.start_active_api_send(self._body()),
                             202,
                         )
+                        return
+                    if self.path == "/api/v1/uploads":
+                        if not self._active_api_authorized():
+                            return
+                        try:
+                            length = int(self.headers.get("Content-Length", "0"))
+                        except ValueError as exc:
+                            raise ProtocolError(
+                                "invalid_length",
+                                "Content-Length 无效。",
+                            ) from exc
+                        media_type = str(self.headers.get("X-Media-Type") or "")
+                        encoded_name = str(self.headers.get("X-File-Name") or "")
+                        if len(encoded_name) > 2048:
+                            raise ProtocolError("invalid_filename", "媒体文件名过长。")
+                        filename = unquote(encoded_name, encoding="utf-8", errors="replace")
+                        upload = console.service.begin_active_api_upload(
+                            media_type,
+                            filename,
+                            length,
+                        )
+                        written = 0
+                        try:
+                            self.connection.settimeout(120.0)
+                            with open(upload["temporary_path"], "xb") as stream:
+                                remaining = length
+                                while remaining:
+                                    chunk = self.rfile.read(min(1024 * 1024, remaining))
+                                    if not chunk:
+                                        break
+                                    stream.write(chunk)
+                                    written += len(chunk)
+                                    remaining -= len(chunk)
+                            result = console.service.finish_active_api_upload(
+                                upload["id"],
+                                written,
+                            )
+                        except Exception:
+                            console.service.cancel_active_api_upload(upload["id"])
+                            raise
+                        self._json({"ok": True, **result}, 201)
+                        return
+                    if self.path.startswith("/api/v1/uploads/") and self.path.endswith("/cancel"):
+                        if not self._active_api_authorized():
+                            return
+                        upload_id = self.path.rstrip("/").rsplit("/", 2)[-2]
+                        removed = console.service.cancel_active_api_upload(upload_id)
+                        self._json({"ok": True, "cancelled": removed, "upload_id": upload_id})
                         return
                     if self.path.startswith("/api/v1/messages/") and self.path.endswith("/cancel"):
                         if not self._active_api_authorized():
@@ -1403,7 +1549,9 @@ class BridgeConsole:
                 except (ProtocolError, ConfigError) as exc:
                     code = getattr(exc, "code", "invalid_config")
                     message = getattr(exc, "message", str(exc))
-                    if self.path.startswith("/api/v1/messages"):
+                    if code in {"media_too_large", "body_too_large"}:
+                        status = 413
+                    elif self.path.startswith("/api/v1/messages"):
                         status = (
                             409
                             if code in {

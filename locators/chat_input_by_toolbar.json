@@ -2,10 +2,10 @@
   "version": 1,
   "id": "locate_chat_input_by_toolbar",
   "theme": "light",
-  "description": "仅在浅色模式下，通过发送按钮和表情按钮共同定位发送按钮正上方的稳定输入区域",
+  "description": "仅在浅色模式下，通过发送按钮和表情按钮共同定位工具栏正上方、从表情按钮纵向对称轴延伸到发送按钮纵向对称轴的稳定输入区域",
   "click": {
-    "description": "在推算区域内部横纵各保留 20% 边距后随机点击",
-    "x_fraction": [0.20, 0.80],
+    "description": "横向完整使用表情按钮与发送按钮两条纵向对称轴之间的区域，纵向上下各收缩 20% 后随机点击",
+    "x_fraction": [0.00, 1.00],
     "y_fraction": [0.20, 0.80]
   },
   "anchors": {
@@ -32,9 +32,9 @@
       "id": "send_button_plus_emoji_button",
       "anchors": ["send_button", "emoji_button"],
       "target": {
-        "left": {"anchor": "send_button", "reference": "left", "offset": 6},
+        "left": {"anchor": "emoji_button", "reference": "center_x", "offset": 0},
         "top": {"anchor": "send_button", "reference": "top", "offset": -39},
-        "right": {"anchor": "send_button", "reference": "right", "offset": -12},
+        "right": {"anchor": "send_button", "reference": "center_x", "offset": 0},
         "bottom": {"anchor": "send_button", "reference": "top", "offset": -15}
       },
       "constraints": [
@@ -68,8 +68,8 @@
         }
       ],
       "bounds": {
-        "min_width": 30,
-        "max_width": 60,
+        "min_width": 60,
+        "max_width": 3000,
         "min_height": 20,
         "max_height": 32
       }

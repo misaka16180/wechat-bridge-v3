@@ -43,6 +43,8 @@ DEFAULT_SENDER_SETTINGS: dict[str, Any] = {
     "lock_mouse": True,
     "lock_keyboard": False,
     "min_reply_delay": 3,
+    "send_review_delay_min": 0.60,
+    "send_review_delay_max": 1.40,
     "click_before_delay_min": 0.10,
     "click_before_delay_max": 0.25,
     "click_hold_duration_min": 0.04,
@@ -76,6 +78,11 @@ DEFAULT_SENDER_SETTINGS: dict[str, Any] = {
     "character_delay": 0.03,
     "character_delay_min": 0.025,
     "character_delay_max": 0.07,
+    "natural_typing_enabled": True,
+    "typing_burst_chars_min": 2,
+    "typing_burst_chars_max": 6,
+    "typing_pause_min": 0.18,
+    "typing_pause_max": 0.65,
     "paste_enabled": True,
     "verification_enabled": False,
 }
@@ -91,6 +98,8 @@ def default_sender_profiles(
         **copy.deepcopy(balanced),
         "settle": 1,
         "min_reply_delay": 5,
+        "send_review_delay_min": 1.20,
+        "send_review_delay_max": 2.60,
         "click_before_delay_min": 0.18,
         "click_before_delay_max": 0.42,
         "click_hold_duration_min": 0.06,
@@ -115,6 +124,8 @@ def default_sender_profiles(
         **copy.deepcopy(balanced),
         "settle": 0.2,
         "min_reply_delay": 0,
+        "send_review_delay_min": 0.20,
+        "send_review_delay_max": 0.50,
         "click_before_delay_min": 0.04,
         "click_before_delay_max": 0.10,
         "click_hold_duration_min": 0.02,
@@ -229,6 +240,7 @@ def create_default_config(path: str | Path) -> str:
         "active_api": {
             "enabled": False,
             "token": "",
+            "public_docs_enabled": False,
         },
         "active_sender_profile": "balanced",
         "sender_profiles": default_sender_profiles(),
@@ -425,6 +437,7 @@ class ActiveApiConfig:
 
     enabled: bool = False
     token: str = ""
+    public_docs_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -440,6 +453,8 @@ class SenderConfig:
     lock_mouse: bool = True
     lock_keyboard: bool = False
     min_reply_delay: float = 3.0
+    send_review_delay_min: float = 0.60
+    send_review_delay_max: float = 1.40
     click_before_delay_min: float = 0.10
     click_before_delay_max: float = 0.25
     click_hold_duration_min: float = 0.04
@@ -473,6 +488,11 @@ class SenderConfig:
     character_delay: float = 0.03
     character_delay_min: float = 0.025
     character_delay_max: float = 0.07
+    natural_typing_enabled: bool = True
+    typing_burst_chars_min: int = 2
+    typing_burst_chars_max: int = 6
+    typing_pause_min: float = 0.18
+    typing_pause_max: float = 0.65
     paste_enabled: bool = False
     verification_enabled: bool = False
 
@@ -609,6 +629,13 @@ class BridgeConfig:
             raise ConfigError("sender.min_reply_delay 必须在 0..120 秒。")
         if not (
             0
+            <= self.sender.send_review_delay_min
+            <= self.sender.send_review_delay_max
+            <= 10
+        ):
+            raise ConfigError("发送前检查停顿时间必须设置在 0..10 秒，且最长值不能小于最短值。")
+        if not (
+            0
             <= self.sender.click_before_delay_min
             <= self.sender.click_before_delay_max
             <= 10
@@ -662,6 +689,26 @@ class BridgeConfig:
         ):
             raise ConfigError(
                 "sender.character_delay_min/max must form a range between 0 and 2 seconds."
+            )
+        if not isinstance(self.sender.natural_typing_enabled, bool):
+            raise ConfigError("sender.natural_typing_enabled 必须是布尔值。")
+        if not (
+            1
+            <= self.sender.typing_burst_chars_min
+            <= self.sender.typing_burst_chars_max
+            <= 100
+        ):
+            raise ConfigError(
+                "sender.typing_burst_chars_min/max 必须形成 1 到 100 之间的递增范围。"
+            )
+        if not (
+            0
+            <= self.sender.typing_pause_min
+            <= self.sender.typing_pause_max
+            <= 10
+        ):
+            raise ConfigError(
+                "sender.typing_pause_min/max 必须形成 0 到 10 秒之间的递增范围。"
             )
         if not isinstance(self.automation.stop_hotkey_enabled, bool):
             raise ConfigError("automation.stop_hotkey_enabled 必须是布尔值。")
@@ -868,6 +915,9 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
         active_api=ActiveApiConfig(
             enabled=bool(active_api_raw.get("enabled", False)),
             token=active_api_token,
+            public_docs_enabled=bool(
+                active_api_raw.get("public_docs_enabled", False)
+            ),
         ),
         sender=SenderConfig(
             timeout=float(sender_raw.get("timeout", 8)),
@@ -892,6 +942,12 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
             lock_mouse=bool(sender_raw.get("lock_mouse", True)),
             lock_keyboard=bool(sender_raw.get("lock_keyboard", False)),
             min_reply_delay=float(sender_raw.get("min_reply_delay", 3)),
+            send_review_delay_min=float(
+                sender_raw.get("send_review_delay_min", 0.60)
+            ),
+            send_review_delay_max=float(
+                sender_raw.get("send_review_delay_max", 1.40)
+            ),
             click_before_delay_min=float(
                 sender_raw.get("click_before_delay_min", 0.10)
             ),
@@ -974,6 +1030,17 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
                     sender_raw.get("character_delay", 0.03),
                 )
             ),
+            natural_typing_enabled=bool(
+                sender_raw.get("natural_typing_enabled", True)
+            ),
+            typing_burst_chars_min=int(
+                sender_raw.get("typing_burst_chars_min", 2)
+            ),
+            typing_burst_chars_max=int(
+                sender_raw.get("typing_burst_chars_max", 6)
+            ),
+            typing_pause_min=float(sender_raw.get("typing_pause_min", 0.18)),
+            typing_pause_max=float(sender_raw.get("typing_pause_max", 0.65)),
             paste_enabled=bool(sender_raw.get("paste_enabled", False)),
             verification_enabled=bool(
                 sender_raw.get("verification_enabled", False)

@@ -131,6 +131,13 @@ class DesktopMessageSettings:
     character_delay: float = 0.03
     character_delay_min: float = 0.02
     character_delay_max: float = 0.06
+    natural_typing_enabled: bool = True
+    typing_burst_chars_min: int = 2
+    typing_burst_chars_max: int = 6
+    typing_pause_min: float = 0.18
+    typing_pause_max: float = 0.65
+    send_review_delay_min: float = 0.60
+    send_review_delay_max: float = 1.40
     click_before_delay_min: float = 0.10
     click_before_delay_max: float = 0.25
     click_hold_duration_min: float = 0.04
@@ -200,6 +207,26 @@ class DesktopMessageSettings:
             0 <= self.character_delay_min <= self.character_delay_max <= 2
         ):
             raise ValueError("逐字输入间隔范围必须位于 0 到 2 秒之间，且最长值不能小于最短值。")
+        if not isinstance(self.natural_typing_enabled, bool):
+            raise ValueError("自然输入节奏选项必须是布尔值。")
+        if not (
+            1
+            <= self.typing_burst_chars_min
+            <= self.typing_burst_chars_max
+            <= 100
+        ):
+            raise ValueError("连续输入字数必须位于 1 到 100 之间，且最大值不能小于最小值。")
+        if not (
+            0 <= self.typing_pause_min <= self.typing_pause_max <= 10
+        ):
+            raise ValueError("输入思考停顿必须位于 0 到 10 秒之间，且最长值不能小于最短值。")
+        if not (
+            0
+            <= self.send_review_delay_min
+            <= self.send_review_delay_max
+            <= 10
+        ):
+            raise ValueError("发送前检查停顿时间必须设置在 0 到 10 秒之间，且最长值不能小于最短值。")
         if not (
             0
             <= self.click_before_delay_min
@@ -604,6 +631,11 @@ class VisualDesktopMessageSender:
             character_delay=self.settings.character_delay,
             character_delay_min=self.settings.character_delay_min,
             character_delay_max=self.settings.character_delay_max,
+            natural_typing_enabled=self.settings.natural_typing_enabled,
+            typing_burst_chars_min=self.settings.typing_burst_chars_min,
+            typing_burst_chars_max=self.settings.typing_burst_chars_max,
+            typing_pause_min=self.settings.typing_pause_min,
+            typing_pause_max=self.settings.typing_pause_max,
         )
         self.clipboard = clipboard or Win32Clipboard()
         self.popup_detector = popup_detector or MentionPopupDetector()
@@ -703,6 +735,23 @@ class VisualDesktopMessageSender:
     @staticmethod
     def _type(keyboard: KeyboardLike, text: str, cancel_event: threading.Event | None) -> None:
         MentionComposer._type(keyboard, text, cancel_event)
+
+    @staticmethod
+    def _type_message(
+        keyboard: KeyboardLike,
+        text: str,
+        cancel_event: threading.Event | None,
+    ) -> None:
+        message_typist = getattr(keyboard, "type_message_text", None)
+        if not callable(message_typist):
+            MentionComposer._type(keyboard, text, cancel_event)
+            return
+        try:
+            message_typist(text, cancel_event=cancel_event)
+        except TypeError as exc:
+            if "cancel_event" not in str(exc):
+                raise
+            message_typist(text)
 
     def _call_traced(
         self,
@@ -1443,7 +1492,7 @@ class VisualDesktopMessageSender:
                         self._cancelled(cancel_event)
                         self.keyboard.ctrl_v()
                     else:
-                        self._type(self.keyboard, value, cancel_event)
+                        self._type_message(self.keyboard, value, cancel_event)
                 except Exception as exc:
                     self.trace.end(
                         "input.paste_text" if use_clipboard else "input.type_text",
@@ -1629,6 +1678,12 @@ class VisualDesktopMessageSender:
             raise DesktopMessageError("send_button_not_found", "媒体粘贴后没有定位到可用发送按钮。")
         send_bounds = self._screen_rect(send_frame, send_detection.bounds)
         self._cancelled(cancel_event)
+        self._wait_random_traced(
+            "wait.pre_send_review",
+            self.settings.send_review_delay_min,
+            self.settings.send_review_delay_max,
+            cancel_event=cancel_event,
+        )
         states.append("SEND_COMMITTED")
         try:
             self._call_traced(
@@ -1804,6 +1859,12 @@ class VisualDesktopMessageSender:
             raise DesktopMessageError("send_button_not_found", "发送按钮定位失败，未执行发送。")
         states.append("READY_TO_SEND")
         send_bounds = self._screen_rect(send_frame, send_detection.bounds)
+        self._wait_random_traced(
+            "wait.pre_send_review",
+            self.settings.send_review_delay_min,
+            self.settings.send_review_delay_max,
+            cancel_event=cancel_event,
+        )
         states.append("SEND_COMMITTED")
         try:
             self._call_traced(

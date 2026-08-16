@@ -382,6 +382,14 @@ class RandomizedInteraction:
             start.x + dx * 0.70 + perpendicular_x * bend * 0.55,
             start.y + dy * 0.70 + perpendicular_y * bend * 0.55,
         )
+        # A cubic Bézier already avoids a mechanically straight segment.  Add
+        # a very small *smooth* lateral variation in the middle of the path so
+        # successive cursor samples are not mathematically perfect either.
+        # The sin(pi*t) envelope forces the disturbance to zero at both ends:
+        # the cursor still starts naturally and lands on the exact safe point.
+        jitter_amplitude = min(3.2, distance * 0.009) * self.rng.uniform(0.65, 1.0)
+        jitter_frequency = self.rng.uniform(1.15, 2.35)
+        jitter_phase = self.rng.uniform(0.0, math.tau)
         points: list[Point] = []
         for index in range(1, steps + 1):
             t = index / steps
@@ -398,6 +406,21 @@ class RandomizedInteraction:
                 + 3 * inverse * t**2 * control_2[1]
                 + t**3 * target.y
             )
+            envelope = math.sin(math.pi * t)
+            jitter = (
+                jitter_amplitude
+                * envelope
+                * (
+                    0.72 * math.sin(math.tau * jitter_frequency * t + jitter_phase)
+                    + 0.28
+                    * math.sin(
+                        math.tau * (jitter_frequency * 1.83) * t
+                        + jitter_phase * 0.47
+                    )
+                )
+            )
+            x += perpendicular_x * jitter
+            y += perpendicular_y * jitter
             point = Point(round(x), round(y))
             if not points or point != points[-1]:
                 points.append(point)

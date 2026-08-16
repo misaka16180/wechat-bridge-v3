@@ -143,6 +143,7 @@ class BridgeService:
         self._api_request_index: dict[str, tuple[str, str]] = {}
         self._api_queue: deque[str] = deque()
         self._api_worker: Optional[threading.Thread] = None
+        self._api_uploads: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._debug_uploads: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._debug_lock = threading.RLock()
         self._api_lock = threading.RLock()
@@ -1638,6 +1639,13 @@ class BridgeService:
                             character_delay=sender.character_delay,
                             character_delay_min=sender.character_delay_min,
                             character_delay_max=sender.character_delay_max,
+                            natural_typing_enabled=sender.natural_typing_enabled,
+                            typing_burst_chars_min=sender.typing_burst_chars_min,
+                            typing_burst_chars_max=sender.typing_burst_chars_max,
+                            typing_pause_min=sender.typing_pause_min,
+                            typing_pause_max=sender.typing_pause_max,
+                            send_review_delay_min=sender.send_review_delay_min,
+                            send_review_delay_max=sender.send_review_delay_max,
                             click_before_delay_min=sender.click_before_delay_min,
                             click_before_delay_max=sender.click_before_delay_max,
                             click_hold_duration_min=sender.click_hold_duration_min,
@@ -1843,6 +1851,12 @@ class BridgeService:
                                 adaptive_layout=self.config.sender.adaptive_layout,
                                 reuse_open_chat=self.config.sender.reuse_open_chat,
                                 layout_cache=self.config.sender.layout_cache,
+                                send_review_delay_min=(
+                                    self.config.sender.send_review_delay_min
+                                ),
+                                send_review_delay_max=(
+                                    self.config.sender.send_review_delay_max
+                                ),
                                 click_before_delay_min=(
                                     self.config.sender.click_before_delay_min
                                 ),
@@ -2662,7 +2676,8 @@ class BridgeService:
             "stage": "cancelled",
             "message": message,
         }
-        task.pop("request_internal", None)
+        request = task.pop("request_internal", None)
+        self._cleanup_active_api_upload(request)
         self._api_task_cancels.pop(task_id, None)
 
     def _cancel_active_api_tasks(self, *, reason: str, message: str) -> None:
@@ -2758,20 +2773,31 @@ class BridgeService:
             )
         text = str(payload.get("text") or "")
         source = ""
+        upload_id = str(payload.get("upload_id") or "").strip()
         filename = str(payload.get("filename") or payload.get("name_hint") or "").strip()
         if message_type == "text":
             if not text.strip():
                 raise ProtocolError("invalid_request", "text 不能为空。")
+            if upload_id:
+                raise ProtocolError(
+                    "invalid_request",
+                    "文字消息不能携带 upload_id。",
+                )
         else:
             for key in ("source", "file", "url", "path"):
                 value = payload.get(key)
                 if isinstance(value, str) and value.strip():
                     source = value.strip()
                     break
-            if not source:
+            if upload_id and source:
+                raise ProtocolError(
+                    "media_source_conflict",
+                    "upload_id 与 source/file/url/path 只能选择一种媒体来源。",
+                )
+            if not source and not upload_id:
                 raise ProtocolError(
                     "media_source_missing",
-                    "图片或文件请求必须提供 source、file、url 或 path。",
+                    "图片或文件请求必须提供 upload_id、source、file、url 或 path。",
                 )
             if len(source) > 4096:
                 raise ProtocolError("media_source_invalid", "媒体来源地址过长。")
@@ -2784,6 +2810,7 @@ class BridgeService:
             "message_type": message_type,
             "text": text if message_type == "text" else "",
             "source": source if message_type != "text" else "",
+            "upload_id": upload_id if message_type != "text" else "",
             "filename": filename if message_type != "text" else "",
         }
         fingerprint = hashlib.sha256(
@@ -2794,6 +2821,7 @@ class BridgeService:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+        self._prune_active_api_uploads()
         with self._api_lock:
             existing = self._api_request_index.get(request_id)
             if existing is not None:
@@ -2817,6 +2845,26 @@ class BridgeService:
                     "active_api_queue_full",
                     "主动发送 API 队列已满，请稍后重试；不要复用新的 request_id 重复提交。",
                 )
+            upload_cleanup = ""
+            resolved_upload = False
+            if upload_id:
+                upload = self._api_uploads.get(upload_id)
+                if not upload or upload.get("status") != "ready":
+                    raise ProtocolError(
+                        "active_api_upload_not_found",
+                        "upload_id 不存在、尚未上传完成、已经使用或已经过期，请重新上传。",
+                    )
+                if upload.get("media_type") != message_type:
+                    raise ProtocolError(
+                        "active_api_upload_type_mismatch",
+                        "上传文件类型与 message_type 不一致；文件仍然保留，可修正类型后重试。",
+                    )
+                upload = self._api_uploads.pop(upload_id)
+                source = str(upload["path"])
+                upload_cleanup = str(Path(source).parent)
+                resolved_upload = True
+                if not filename:
+                    filename = str(upload.get("name") or Path(source).name)
             task_id = secrets.token_urlsafe(12)
             cancel_event = threading.Event()
             task = {
@@ -2841,6 +2889,8 @@ class BridgeService:
                     "text": text,
                     "source": source,
                     "filename": filename,
+                    "resolved_upload": resolved_upload,
+                    "upload_cleanup": upload_cleanup,
                 },
                 "result": None,
                 "progress": {
@@ -2904,6 +2954,8 @@ class BridgeService:
                 request["text"],
                 request["source"],
                 request["filename"],
+                bool(request.get("resolved_upload")),
+                str(request.get("upload_cleanup") or ""),
                 cancel_event,
             )
 
@@ -2926,6 +2978,7 @@ class BridgeService:
             ("click.chat_input", 76, "点击聊天输入区"),
             ("input.", 82, "写入消息内容"),
             ("find.发送按钮", 89, "等待可用发送按钮"),
+            ("wait.pre_send_review", 93, "发送前检查内容"),
             ("click.send_button", 96, "点击发送按钮"),
             ("message.transaction", 98, "完成发送事务"),
         )
@@ -2984,6 +3037,8 @@ class BridgeService:
         text: str,
         source: str,
         filename: str,
+        resolved_upload: bool,
+        upload_cleanup: str,
         cancel_event: threading.Event,
     ) -> None:
         service = self
@@ -3062,6 +3117,7 @@ class BridgeService:
                         message_type,
                         {"file": source, "name": filename},
                         cancel_event=cancel_event,
+                        resolved_path=source if resolved_upload else None,
                     )
             result_data = result.to_dict()
         except ProtocolError as exc:
@@ -3077,6 +3133,8 @@ class BridgeService:
         finally:
             for task_logger in task_loggers:
                 task_logger.removeHandler(handler)
+            if upload_cleanup:
+                shutil.rmtree(upload_cleanup, ignore_errors=True)
         with self._api_lock:
             task = self._api_tasks.get(task_id)
             if task is None:
@@ -3557,6 +3615,101 @@ class BridgeService:
         return name
 
     @staticmethod
+    def _cleanup_active_api_upload(request: Any) -> None:
+        if not isinstance(request, dict):
+            return
+        cleanup = str(request.get("upload_cleanup") or "")
+        if cleanup:
+            shutil.rmtree(cleanup, ignore_errors=True)
+
+    def _prune_active_api_uploads(self) -> None:
+        cutoff = time.time() - 30 * 60
+        expired: list[dict[str, Any]] = []
+        with self._api_lock:
+            for upload_id, upload in list(self._api_uploads.items()):
+                if float(upload.get("created_at") or 0) < cutoff:
+                    expired.append(self._api_uploads.pop(upload_id))
+        for upload in expired:
+            self._remove_debug_upload(upload)
+
+    def begin_active_api_upload(
+        self,
+        media_type: str,
+        filename: str,
+        content_length: int,
+    ) -> dict[str, Any]:
+        """Reserve one authenticated, bounded upload for the proactive API."""
+
+        if not self.config.active_api.enabled:
+            raise ProtocolError("active_api_disabled", "主动发送 API 尚未启用。")
+        self._prune_active_api_uploads()
+        validated = self.validate_debug_upload(media_type, filename, content_length)
+        media_type = str(validated["media_type"])
+        safe_name = str(validated["name"])
+        content_length = int(validated["size"])
+        with self._api_lock:
+            if len(self._api_uploads) >= 20:
+                raise ProtocolError(
+                    "active_api_upload_limit",
+                    "待使用的主动 API 媒体上传已达 20 个；请先使用或取消已有上传。",
+                )
+            upload_id = secrets.token_urlsafe(24)
+            root = Path(self.config.media.temp_dir) / "active-api-uploads"
+            folder = root / secrets.token_hex(12)
+            folder.mkdir(parents=True, exist_ok=False)
+            final_path = folder / safe_name
+            temporary_path = folder / (safe_name + ".uploading")
+            upload = {
+                "id": upload_id,
+                "media_type": media_type,
+                "name": safe_name,
+                "size": content_length,
+                "path": str(final_path),
+                "temporary_path": str(temporary_path),
+                "status": "uploading",
+                "created_at": time.time(),
+            }
+            self._api_uploads[upload_id] = upload
+        return dict(upload)
+
+    def finish_active_api_upload(
+        self,
+        upload_id: str,
+        bytes_written: int,
+    ) -> dict[str, Any]:
+        with self._api_lock:
+            upload = self._api_uploads.get(str(upload_id))
+            if upload is None or upload.get("status") != "uploading":
+                raise ProtocolError(
+                    "active_api_upload_not_found",
+                    "主动 API 媒体上传任务不存在。",
+                )
+            if int(bytes_written) != int(upload["size"]):
+                failed = self._api_uploads.pop(str(upload_id))
+                self._remove_debug_upload(failed)
+                raise ProtocolError(
+                    "incomplete_upload",
+                    "媒体文件上传不完整，请重新上传。",
+                )
+            Path(upload["temporary_path"]).replace(upload["path"])
+            upload["status"] = "ready"
+            return {
+                "upload_id": upload["id"],
+                "name": upload["name"],
+                "size": upload["size"],
+                "media_type": upload["media_type"],
+                "expires_in_seconds": 30 * 60,
+            }
+
+    def cancel_active_api_upload(self, upload_id: str) -> bool:
+        with self._api_lock:
+            upload = self._api_uploads.pop(str(upload_id), None)
+        if upload:
+            self._remove_debug_upload(upload)
+            return True
+        return False
+
+    @staticmethod
     def _remove_debug_upload(upload: dict[str, Any]) -> None:
         candidate = upload.get("path") or upload.get("temporary_path")
         if candidate:
@@ -3778,6 +3931,8 @@ class BridgeService:
                     "lock_mouse": sender.lock_mouse,
                     "lock_keyboard": sender.lock_keyboard,
                     "min_reply_delay": sender.min_reply_delay,
+                    "send_review_delay_min": sender.send_review_delay_min,
+                    "send_review_delay_max": sender.send_review_delay_max,
                     "click_before_delay_min": sender.click_before_delay_min,
                     "click_before_delay_max": sender.click_before_delay_max,
                     "click_hold_duration_min": sender.click_hold_duration_min,
@@ -3817,6 +3972,11 @@ class BridgeService:
                     "character_delay": sender.character_delay,
                     "character_delay_min": sender.character_delay_min,
                     "character_delay_max": sender.character_delay_max,
+                    "natural_typing_enabled": sender.natural_typing_enabled,
+                    "typing_burst_chars_min": sender.typing_burst_chars_min,
+                    "typing_burst_chars_max": sender.typing_burst_chars_max,
+                    "typing_pause_min": sender.typing_pause_min,
+                    "typing_pause_max": sender.typing_pause_max,
                     "paste_enabled": sender.paste_enabled,
                     "verification_enabled": sender.verification_enabled,
                 },
@@ -3853,6 +4013,8 @@ class BridgeService:
                     "lock_mouse": {"type": "boolean"},
                     "lock_keyboard": {"type": "boolean"},
                     "min_reply_delay": {"type": "number", "minimum": 0, "maximum": 120},
+                    "send_review_delay_min": {"type": "number", "minimum": 0, "maximum": 10},
+                    "send_review_delay_max": {"type": "number", "minimum": 0, "maximum": 10},
                     "click_before_delay_min": {"type": "number", "minimum": 0, "maximum": 10},
                     "click_before_delay_max": {"type": "number", "minimum": 0, "maximum": 10},
                     "click_hold_duration_min": {"type": "number", "minimum": 0, "maximum": 2},
@@ -3915,6 +4077,15 @@ class BridgeService:
                     "character_delay": {"type": "number", "minimum": 0, "maximum": 2},
                     "character_delay_min": {"type": "number", "minimum": 0, "maximum": 2},
                     "character_delay_max": {"type": "number", "minimum": 0, "maximum": 2},
+                    "natural_typing_enabled": {
+                        "type": "boolean",
+                        "default": True,
+                        "requires": "input_mode=keyboard",
+                    },
+                    "typing_burst_chars_min": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "typing_burst_chars_max": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "typing_pause_min": {"type": "number", "minimum": 0, "maximum": 10},
+                    "typing_pause_max": {"type": "number", "minimum": 0, "maximum": 10},
                     "paste_enabled": {"type": "boolean"},
                     "verification_enabled": {"type": "boolean"},
                 },
@@ -3943,6 +4114,8 @@ class BridgeService:
             "lock_mouse",
             "lock_keyboard",
             "min_reply_delay",
+            "send_review_delay_min",
+            "send_review_delay_max",
             "click_before_delay_min",
             "click_before_delay_max",
             "click_hold_duration_min",
@@ -3976,6 +4149,11 @@ class BridgeService:
             "character_delay",
             "character_delay_min",
             "character_delay_max",
+            "natural_typing_enabled",
+            "typing_burst_chars_min",
+            "typing_burst_chars_max",
+            "typing_pause_min",
+            "typing_pause_max",
             "paste_enabled",
             "verification_enabled",
         }
@@ -3999,6 +4177,7 @@ class BridgeService:
             "mention_fallback_enabled",
             "append_line_break_after_input",
             "keyboard_clipboard_threshold_enabled",
+            "natural_typing_enabled",
             "paste_enabled",
             "verification_enabled",
         }
@@ -4006,6 +4185,8 @@ class BridgeService:
             "mask_retry_count",
             "retry_max_attempts",
             "keyboard_clipboard_threshold_chars",
+            "typing_burst_chars_min",
+            "typing_burst_chars_max",
         }
         number_fields = {
             "timeout",
@@ -4014,6 +4195,8 @@ class BridgeService:
             "conversation_enter_delay_max",
             "text_verification_timeout",
             "min_reply_delay",
+            "send_review_delay_min",
+            "send_review_delay_max",
             "click_before_delay_min",
             "click_before_delay_max",
             "click_hold_duration_min",
@@ -4031,6 +4214,8 @@ class BridgeService:
             "character_delay",
             "character_delay_min",
             "character_delay_max",
+            "typing_pause_min",
+            "typing_pause_max",
         }
         changes: dict[str, Any] = {}
         for key, value in sender_raw.items():
