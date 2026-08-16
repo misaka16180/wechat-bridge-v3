@@ -1626,6 +1626,12 @@ class BridgeService:
                             append_line_break_after_input=(
                                 sender.append_line_break_after_input
                             ),
+                            keyboard_clipboard_threshold_enabled=(
+                                sender.keyboard_clipboard_threshold_enabled
+                            ),
+                            keyboard_clipboard_threshold_chars=(
+                                sender.keyboard_clipboard_threshold_chars
+                            ),
                             wechat_ctrl_enter_confirmed=(
                                 self.config.automation.wechat_ctrl_enter_confirmed
                             ),
@@ -3802,6 +3808,12 @@ class BridgeService:
                     "append_line_break_after_input": (
                         sender.append_line_break_after_input
                     ),
+                    "keyboard_clipboard_threshold_enabled": (
+                        sender.keyboard_clipboard_threshold_enabled
+                    ),
+                    "keyboard_clipboard_threshold_chars": (
+                        sender.keyboard_clipboard_threshold_chars
+                    ),
                     "character_delay": sender.character_delay,
                     "character_delay_min": sender.character_delay_min,
                     "character_delay_max": sender.character_delay_max,
@@ -3889,6 +3901,17 @@ class BridgeService:
                         "default": False,
                         "requires": "automation.wechat_ctrl_enter_confirmed",
                     },
+                    "keyboard_clipboard_threshold_enabled": {
+                        "type": "boolean",
+                        "default": False,
+                        "requires": "input_mode=keyboard",
+                    },
+                    "keyboard_clipboard_threshold_chars": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100000,
+                        "default": 40,
+                    },
                     "character_delay": {"type": "number", "minimum": 0, "maximum": 2},
                     "character_delay_min": {"type": "number", "minimum": 0, "maximum": 2},
                     "character_delay_max": {"type": "number", "minimum": 0, "maximum": 2},
@@ -3948,6 +3971,8 @@ class BridgeService:
             "overall_timeout",
             "input_mode",
             "append_line_break_after_input",
+            "keyboard_clipboard_threshold_enabled",
+            "keyboard_clipboard_threshold_chars",
             "character_delay",
             "character_delay_min",
             "character_delay_max",
@@ -3973,12 +3998,14 @@ class BridgeService:
             "render_mask_recovery",
             "mention_fallback_enabled",
             "append_line_break_after_input",
+            "keyboard_clipboard_threshold_enabled",
             "paste_enabled",
             "verification_enabled",
         }
         integer_fields = {
             "mask_retry_count",
             "retry_max_attempts",
+            "keyboard_clipboard_threshold_chars",
         }
         number_fields = {
             "timeout",

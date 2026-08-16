@@ -299,6 +299,8 @@ def send_message(
     overall_timeout: float = 120.0,
     input_mode: str = "keyboard",
     append_line_break_after_input: bool = False,
+    keyboard_clipboard_threshold_enabled: bool = False,
+    keyboard_clipboard_threshold_chars: int = 40,
     wechat_ctrl_enter_confirmed: bool = False,
     character_delay: float = 0.03,
     character_delay_min: Optional[float] = None,
@@ -392,6 +394,12 @@ def send_message(
             mention_fallback_enabled=bool(mention_fallback_enabled),
             input_mode=normalized_input_mode,
             append_line_break_after_input=bool(append_line_break_after_input),
+            keyboard_clipboard_threshold_enabled=bool(
+                keyboard_clipboard_threshold_enabled
+            ),
+            keyboard_clipboard_threshold_chars=int(
+                keyboard_clipboard_threshold_chars
+            ),
             layout_cache=bool(layout_cache),
             tray_activation_enabled=bool(tray_activation),
             tray_activation_timeout=float(tray_timeout),

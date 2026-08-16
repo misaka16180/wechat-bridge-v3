@@ -71,6 +71,8 @@ DEFAULT_SENDER_SETTINGS: dict[str, Any] = {
     "overall_timeout": 120,
     "input_mode": "clipboard",
     "append_line_break_after_input": False,
+    "keyboard_clipboard_threshold_enabled": False,
+    "keyboard_clipboard_threshold_chars": 40,
     "character_delay": 0.03,
     "character_delay_min": 0.025,
     "character_delay_max": 0.07,
@@ -466,6 +468,8 @@ class SenderConfig:
     overall_timeout: float = 120.0
     input_mode: str = "keyboard"
     append_line_break_after_input: bool = False
+    keyboard_clipboard_threshold_enabled: bool = False
+    keyboard_clipboard_threshold_chars: int = 40
     character_delay: float = 0.03
     character_delay_min: float = 0.025
     character_delay_max: float = 0.07
@@ -640,6 +644,14 @@ class BridgeConfig:
             )
         if not isinstance(self.sender.append_line_break_after_input, bool):
             raise ConfigError("sender.append_line_break_after_input 必须是布尔值。")
+        if not isinstance(self.sender.keyboard_clipboard_threshold_enabled, bool):
+            raise ConfigError(
+                "sender.keyboard_clipboard_threshold_enabled 必须是布尔值。"
+            )
+        if not 1 <= self.sender.keyboard_clipboard_threshold_chars <= 100000:
+            raise ConfigError(
+                "sender.keyboard_clipboard_threshold_chars 必须是 1 到 100000 之间的整数。"
+            )
         if not 0 <= self.sender.character_delay <= 2:
             raise ConfigError("sender.character_delay must be between 0 and 2 seconds.")
         if not (
@@ -942,6 +954,12 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
             ).strip().lower(),
             append_line_break_after_input=bool(
                 sender_raw.get("append_line_break_after_input", False)
+            ),
+            keyboard_clipboard_threshold_enabled=bool(
+                sender_raw.get("keyboard_clipboard_threshold_enabled", False)
+            ),
+            keyboard_clipboard_threshold_chars=int(
+                sender_raw.get("keyboard_clipboard_threshold_chars", 40)
             ),
             character_delay=float(sender_raw.get("character_delay", 0.03)),
             character_delay_min=float(

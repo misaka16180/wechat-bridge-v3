@@ -143,6 +143,8 @@ class DesktopMessageSettings:
     mention_fallback_enabled: bool = True
     input_mode: str = "keyboard"
     append_line_break_after_input: bool = False
+    keyboard_clipboard_threshold_enabled: bool = False
+    keyboard_clipboard_threshold_chars: int = 40
     layout_cache: bool = True
     tray_activation_enabled: bool = True
     tray_activation_timeout: float = 3.0
@@ -228,6 +230,10 @@ class DesktopMessageSettings:
             raise ValueError("文字输入方式只能是 keyboard、adaptive 或 clipboard。")
         if not isinstance(self.append_line_break_after_input, bool):
             raise ValueError("输入结束后换行选项必须是布尔值。")
+        if not isinstance(self.keyboard_clipboard_threshold_enabled, bool):
+            raise ValueError("长文本自动改用剪贴板选项必须是布尔值。")
+        if not 1 <= self.keyboard_clipboard_threshold_chars <= 100000:
+            raise ValueError("长文本剪贴板阈值必须是 1 到 100000 之间的整数。")
         if not 0.1 <= self.tray_activation_timeout <= 30:
             raise ValueError("托盘唤醒等待时间必须在 0.1 到 30 秒之间。")
         if not -100000 <= self.window_x <= 100000 or not -100000 <= self.window_y <= 100000:
@@ -1383,6 +1389,22 @@ class VisualDesktopMessageSender:
     ) -> tuple[list[MentionOutcome], list[dict[str, Any]]]:
         mentions: list[MentionOutcome] = []
         warnings: list[dict[str, Any]] = []
+        message_length = sum(len(value) for _mode, value in input_parts)
+        long_text_clipboard = (
+            self.settings.input_mode == "keyboard"
+            and self.settings.keyboard_clipboard_threshold_enabled
+            and message_length > self.settings.keyboard_clipboard_threshold_chars
+            and any(mode == "text" for mode, _value in input_parts)
+        )
+        if long_text_clipboard:
+            self.trace.event(
+                "input.long_text_clipboard",
+                (
+                    f"消息长度 {message_length} > 阈值 "
+                    f"{self.settings.keyboard_clipboard_threshold_chars}，"
+                    "普通文本片段改用剪贴板粘贴；真实 @ 仍按原流程处理"
+                ),
+            )
         composer = MentionComposer(
             session=self.session,
             keyboard=self.keyboard,
@@ -1404,7 +1426,9 @@ class VisualDesktopMessageSender:
                 if warning is not None:
                     warnings.append(warning)
             elif mode in {"text", "keyboard"}:
-                use_clipboard = mode == "text" and self.settings.input_mode == "clipboard"
+                use_clipboard = mode == "text" and (
+                    self.settings.input_mode == "clipboard" or long_text_clipboard
+                )
                 started = self.trace.begin(
                     "input.paste_text" if use_clipboard else "input.type_text",
                     (
