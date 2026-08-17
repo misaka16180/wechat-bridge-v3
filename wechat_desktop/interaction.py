@@ -288,6 +288,13 @@ class RandomizedInteraction:
         self._wait(duration, cancel_event)
         return duration
 
+    def choose_random_duration(self, minimum: float, maximum: float) -> float:
+        """Choose a duration without sleeping so other work can consume it."""
+
+        if minimum < 0 or maximum < minimum:
+            raise ValueError("等待时间范围无效。")
+        return self.rng.uniform(minimum, maximum)
+
     def safe_rect(
         self,
         bounds: Rect,

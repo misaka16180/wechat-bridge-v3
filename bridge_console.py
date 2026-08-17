@@ -976,6 +976,44 @@ class BridgeConsole:
             def _auth_token(self) -> str:
                 return self._bearer_token() or self._cookie_token()
 
+            def _discard_rejected_active_api_body(self) -> None:
+                """Drain a small rejected body so Windows can deliver JSON 4xx.
+
+                Closing a socket while the client is still uploading can turn
+                an intentional 401/403 response into WSAECONNABORTED on
+                Windows.  Keep this bounded: unauthenticated callers must not
+                be able to make a handler consume an arbitrarily large body.
+                """
+
+                if str(self.headers.get("Expect") or "").strip().casefold() == "100-continue":
+                    return
+                try:
+                    remaining = int(self.headers.get("Content-Length", "0"))
+                except (TypeError, ValueError):
+                    return
+                if not 0 < remaining <= 1024 * 1024:
+                    return
+                previous_timeout = self.connection.gettimeout()
+                try:
+                    self.connection.settimeout(0.5)
+                    while remaining:
+                        chunk = self.rfile.read(min(64 * 1024, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                except (OSError, TimeoutError):
+                    pass
+                finally:
+                    try:
+                        self.connection.settimeout(previous_timeout)
+                    except OSError:
+                        pass
+
+            def _reject_active_api(self, payload: dict[str, Any], status: int) -> bool:
+                self._discard_rejected_active_api_body()
+                self._json(payload, status)
+                return False
+
             def _authorized(self, *, allow_setup: bool = False) -> bool:
                 if not self._origin_allowed():
                     self._json({"ok": False, "error": "Origin 不允许。"}, 403)
@@ -997,35 +1035,39 @@ class BridgeConsole:
 
             def _active_api_authorized(self) -> bool:
                 if not self._origin_allowed():
-                    self._json({"ok": False, "error": "Origin 不允许。"}, 403)
-                    return False
+                    return self._reject_active_api(
+                        {"ok": False, "error": "Origin 不允许。"},
+                        403,
+                    )
                 active_api = getattr(console.service.config, "active_api", None)
                 if active_api is None or not active_api.enabled:
-                    self._json(
+                    return self._reject_active_api(
                         {"ok": False, "error": "主动发送 API 尚未启用。", "code": "active_api_disabled"},
                         403,
                     )
-                    return False
                 supplied = self._bearer_token()
                 configured = str(active_api.token or "")
                 if configured:
                     if not supplied or not hmac.compare_digest(supplied, configured):
-                        self._json({"ok": False, "error": "主动发送 API Token 无效。", "code": "active_api_unauthorized"}, 401)
-                        return False
+                        return self._reject_active_api(
+                            {"ok": False, "error": "主动发送 API Token 无效。", "code": "active_api_unauthorized"},
+                            401,
+                        )
                     return True
                 try:
                     local = ipaddress.ip_address(self._client_ip()).is_loopback
                 except ValueError:
                     local = False
                 if not local:
-                    self._json(
+                    return self._reject_active_api(
                         {"ok": False, "error": "未配置 API Token 时只允许本机回环地址调用。", "code": "active_api_local_only"},
                         401,
                     )
-                    return False
                 if supplied:
-                    self._json({"ok": False, "error": "当前 API 未配置 Token，请不要发送 Bearer 凭据。", "code": "active_api_unauthorized"}, 401)
-                    return False
+                    return self._reject_active_api(
+                        {"ok": False, "error": "当前 API 未配置 Token，请不要发送 Bearer 凭据。", "code": "active_api_unauthorized"},
+                        401,
+                    )
                 return True
 
             def _client_ip(self) -> str:

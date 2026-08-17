@@ -1567,6 +1567,8 @@ class BridgeService:
                             text,
                             timeout=sender.timeout,
                             settle=sender.settle,
+                            search_result_wait_min=sender.search_result_wait_min,
+                            search_result_wait_max=sender.search_result_wait_max,
                             conversation_entry_mode=sender.conversation_entry_mode,
                             conversation_enter_delay_min=(
                                 sender.conversation_enter_delay_min
@@ -1833,6 +1835,12 @@ class BridgeService:
                                 resolved.path,
                                 timeout=self.config.sender.timeout,
                                 settle=self.config.sender.settle,
+                                search_result_wait_min=(
+                                    self.config.sender.search_result_wait_min
+                                ),
+                                search_result_wait_max=(
+                                    self.config.sender.search_result_wait_max
+                                ),
                                 conversation_entry_mode=(
                                     self.config.sender.conversation_entry_mode
                                 ),
@@ -3918,6 +3926,8 @@ class BridgeService:
                 "sender": {
                     "timeout": sender.timeout,
                     "settle": sender.settle,
+                    "search_result_wait_min": sender.search_result_wait_min,
+                    "search_result_wait_max": sender.search_result_wait_max,
                     "conversation_entry_mode": sender.conversation_entry_mode,
                     "conversation_enter_delay_min": (
                         sender.conversation_enter_delay_min
@@ -3983,10 +3993,22 @@ class BridgeService:
                 "schema": {
                     "timeout": {"type": "number", "minimum": 0.001, "maximum": 120},
                     "settle": {"type": "number", "minimum": 0, "maximum": 10},
+                    "search_result_wait_min": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "default": 0.5,
+                    },
+                    "search_result_wait_max": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 10,
+                        "default": 0.7,
+                    },
                     "conversation_entry_mode": {
                         "type": "string",
-                        "enum": ["keyboard_shortcut", "mouse_click_unstable"],
-                        "default": "keyboard_shortcut",
+                        "enum": ["mouse_click_sections", "keyboard_shortcut"],
+                        "default": "mouse_click_sections",
                     },
                     "conversation_enter_delay_min": {
                         "type": "number",
@@ -4105,6 +4127,8 @@ class BridgeService:
         allowed = {
             "timeout",
             "settle",
+            "search_result_wait_min",
+            "search_result_wait_max",
             "conversation_entry_mode",
             "conversation_enter_delay_min",
             "conversation_enter_delay_max",
@@ -4191,6 +4215,8 @@ class BridgeService:
         number_fields = {
             "timeout",
             "settle",
+            "search_result_wait_min",
+            "search_result_wait_max",
             "conversation_enter_delay_min",
             "conversation_enter_delay_max",
             "text_verification_timeout",

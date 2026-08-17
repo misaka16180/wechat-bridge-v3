@@ -34,7 +34,9 @@ EDITABLE_PROFILE_NAMES = ("custom",)
 DEFAULT_SENDER_SETTINGS: dict[str, Any] = {
     "timeout": 8,
     "settle": 0.35,
-    "conversation_entry_mode": "keyboard_shortcut",
+    "search_result_wait_min": 0.50,
+    "search_result_wait_max": 0.70,
+    "conversation_entry_mode": "mouse_click_sections",
     "conversation_enter_delay_min": 0.20,
     "conversation_enter_delay_max": 0.50,
     "text_verification_timeout": 0,
@@ -198,6 +200,8 @@ def sender_profile_state(
             values["input_mode"] = "keyboard"
         elif input_mode == "adaptive":
             values["input_mode"] = "clipboard"
+        if str(values.get("conversation_entry_mode") or "").strip().lower() == "mouse_click_unstable":
+            values["conversation_entry_mode"] = "mouse_click_sections"
     active_raw = str(raw.get("active_sender_profile") or "").strip().lower()
     if active_raw:
         if active_raw not in SENDER_PROFILE_NAMES:
@@ -444,7 +448,9 @@ class ActiveApiConfig:
 class SenderConfig:
     timeout: float = 8.0
     settle: float = 0.5
-    conversation_entry_mode: str = "keyboard_shortcut"
+    search_result_wait_min: float = 0.50
+    search_result_wait_max: float = 0.70
+    conversation_entry_mode: str = "mouse_click_sections"
     conversation_enter_delay_min: float = 0.20
     conversation_enter_delay_max: float = 0.50
     text_verification_timeout: float = 3.0
@@ -582,12 +588,22 @@ class BridgeConfig:
             raise ConfigError("WeFlow reconnect 至少 1 秒。")
         if self.sender.timeout <= 0 or self.sender.settle < 0:
             raise ConfigError("sender.timeout 必须大于 0，sender.settle 不能为负数。")
+        if not (
+            0
+            <= self.sender.search_result_wait_min
+            <= self.sender.search_result_wait_max
+            <= 10
+        ):
+            raise ConfigError(
+                "输入会话名称后等待时间必须设置在 0..10 秒，且最短值不能大于最长值。"
+            )
         if self.sender.conversation_entry_mode not in {
             "keyboard_shortcut",
+            "mouse_click_sections",
             "mouse_click_unstable",
         }:
             raise ConfigError(
-                "sender.conversation_entry_mode 只能是 keyboard_shortcut 或 mouse_click_unstable。"
+                "sender.conversation_entry_mode 只能是 mouse_click_sections 或 keyboard_shortcut。"
             )
         if not (
             0
@@ -922,10 +938,24 @@ def from_dict(raw: dict[str, Any]) -> BridgeConfig:
         sender=SenderConfig(
             timeout=float(sender_raw.get("timeout", 8)),
             settle=float(sender_raw.get("settle", 0.5)),
-            conversation_entry_mode=str(
-                sender_raw.get("conversation_entry_mode", "keyboard_shortcut")
-                or "keyboard_shortcut"
-            ).strip().lower(),
+            search_result_wait_min=float(
+                sender_raw.get("search_result_wait_min", 0.50)
+            ),
+            search_result_wait_max=float(
+                sender_raw.get("search_result_wait_max", 0.70)
+            ),
+            conversation_entry_mode=(
+                "mouse_click_sections"
+                if str(
+                    sender_raw.get("conversation_entry_mode", "mouse_click_sections")
+                    or "mouse_click_sections"
+                ).strip().lower()
+                == "mouse_click_unstable"
+                else str(
+                    sender_raw.get("conversation_entry_mode", "mouse_click_sections")
+                    or "mouse_click_sections"
+                ).strip().lower()
+            ),
             conversation_enter_delay_min=float(
                 sender_raw.get("conversation_enter_delay_min", 0.20)
             ),

@@ -21,11 +21,6 @@ from .chat_layer_recovery import (
     load_back_button_spec,
 )
 from .clipboard import ClipboardError, Win32Clipboard
-from .derived_locator import (
-    DerivedLocator,
-    draw_derived_debug_overlay,
-    load_derived_locator,
-)
 from .interaction import InteractionPolicy, RandomizedInteraction
 from .keyboard import Win32KeyboardBackend
 from .layout_cache import (
@@ -37,6 +32,11 @@ from .mention_popup import MentionPopupDetector
 from .models import CapturedFrame, Rect, WindowSnapshot
 from .relative_locator import RelativeLocator, RelativeLocatorResult, load_relative_locator
 from .recognition_snapshot import record_recognition_snapshot
+from .search_result_locator import (
+    SearchResultSectionLocator,
+    draw_search_result_debug_overlay,
+    load_search_result_locator,
+)
 from .session import DesktopSessionError, WeChatWindowSession
 from .tray import WeChatTrayActivator
 
@@ -125,7 +125,9 @@ def _enabled_send_button_with_toolbar(result: RelativeLocatorResult) -> bool:
 class DesktopMessageSettings:
     locate_timeout: float = 8.0
     settle: float = 0.35
-    conversation_entry_mode: str = "keyboard_shortcut"
+    search_result_wait_min: float = 0.50
+    search_result_wait_max: float = 0.70
+    conversation_entry_mode: str = "mouse_click_sections"
     conversation_enter_delay_min: float = 0.20
     conversation_enter_delay_max: float = 0.50
     character_delay: float = 0.03
@@ -185,12 +187,22 @@ class DesktopMessageSettings:
             raise ValueError("DPI 自动扫描间隔必须在 1% 到 50% 之间。")
         if not 0 <= self.settle <= 10:
             raise ValueError("界面稳定等待必须在 0 到 10 秒之间。")
+        if not (
+            0
+            <= self.search_result_wait_min
+            <= self.search_result_wait_max
+            <= 10
+        ):
+            raise ValueError(
+                "输入会话名称后等待时间必须设置在 0 到 10 秒之间，且最长值不能小于最短值。"
+            )
         if self.conversation_entry_mode not in {
             "keyboard_shortcut",
+            "mouse_click_sections",
             "mouse_click_unstable",
         }:
             raise ValueError(
-                "进入会话方式只能是 keyboard_shortcut 或 mouse_click_unstable。"
+                "进入会话方式只能是 mouse_click_sections 或 keyboard_shortcut。"
             )
         if not (
             0
@@ -652,7 +664,9 @@ class VisualDesktopMessageSender:
         ] | None = None
         root = Path(locator_root or Path(__file__).resolve().parents[1] / "locators")
         self.search_box = RelativeLocator(load_relative_locator(root / "search_box_anchors.json"))
-        self.search_result = DerivedLocator(load_derived_locator(root / "search_primary_result.json"))
+        self.search_result = SearchResultSectionLocator(
+            load_search_result_locator(root / "search_result_sections.json")
+        )
         self.chat_input = RelativeLocator(load_relative_locator(root / "chat_input_by_toolbar.json"))
         self.chat_layer_recovery = chat_layer_recovery or ChatLayerRecovery(
             session=self.session,
@@ -1155,6 +1169,11 @@ class VisualDesktopMessageSender:
                 else:
                     last = self.search_result.locate_from_base(image, base)
                 verified_base = getattr(last, "base", None)
+                snapshot_result = (
+                    last.snapshot_result()
+                    if callable(getattr(last, "snapshot_result", None))
+                    else verified_base
+                )
                 if (
                     isinstance(verified_base, RelativeLocatorResult)
                     and verified_base.failure_code == "ambiguous_combinations"
@@ -1162,20 +1181,20 @@ class VisualDesktopMessageSender:
                     snapshot = record_recognition_snapshot(
                         image,
                         verified_base,
-                        label="第一条搜索结果",
+                        label="搜索结果分组与第一项",
                         operation=operation,
                         force=True,
-                        overview=draw_derived_debug_overlay(image, last),
+                        overview=draw_search_result_debug_overlay(image, last),
                         extra_metadata={
-                            "derived_rejection": last.rejection_code,
-                            "derived_details": dict(last.details),
+                            "search_result_rejection": last.rejection_code,
+                            "search_result_details": dict(last.details),
                         },
                     )
                     raise DesktopMessageError(
                         "visual_target_ambiguous",
                         (
                             "搜索框基础定位检测到多个指向不同区域的元素组合，"
-                            "无法安全推算第一条搜索结果。"
+                            "无法安全确定搜索结果列表。"
                         ),
                         details={
                             "target": "第一条搜索结果",
@@ -1202,17 +1221,33 @@ class VisualDesktopMessageSender:
                             remaining_budget,
                             cancel_event=cancel_event,
                         )
-                        now = self.monotonic()
+                        # The first qualified header may still belong to the
+                        # previous search contents.  Never click coordinates
+                        # calculated from a frame captured before the refresh
+                        # budget elapsed; capture and validate once more.
+                        continue
+                    now = self.monotonic()
                     if now >= minimum_deadline:
-                        if isinstance(verified_base, RelativeLocatorResult):
+                        if isinstance(snapshot_result, RelativeLocatorResult):
+                            selected = getattr(last, "selected_header", None)
                             record_recognition_snapshot(
                                 image,
-                                verified_base,
-                                label="第一条搜索结果",
+                                snapshot_result,
+                                label="搜索结果分组与第一项",
                                 operation=operation,
-                                overview=draw_derived_debug_overlay(image, last),
+                                overview=draw_search_result_debug_overlay(image, last),
                                 extra_metadata={
-                                    "derived_target": {
+                                    "selected_section": (
+                                        getattr(selected, "section_id", "")
+                                        if selected is not None
+                                        else ""
+                                    ),
+                                    "selected_section_label": (
+                                        getattr(selected, "label", "")
+                                        if selected is not None
+                                        else ""
+                                    ),
+                                    "result_target": {
                                         "left": last.target.left,
                                         "top": last.target.top,
                                         "right": last.target.right,
@@ -1222,7 +1257,12 @@ class VisualDesktopMessageSender:
                             )
                         self.trace.end(
                             operation,
-                            f"搜索结果查找成功：轮询 {attempts} 次（刷新等待已计入查找耗时）",
+                            (
+                                "搜索结果查找成功：识别到最上方分组“"
+                                f"{getattr(getattr(last, 'selected_header', None), 'label', '未知')}”"
+                                f"并定位其第一项；轮询 {attempts} 次"
+                                "（刷新等待已计入查找耗时）"
+                            ),
                             lookup_started,
                         )
                         return frame, last
@@ -1230,28 +1270,32 @@ class VisualDesktopMessageSender:
                 if remaining <= 0:
                     reason_text = {
                         "base_locator_rejected": "搜索框基础锚点未通过联合校验",
-                        "source_bounds_missing": "搜索框参考区域缺失",
-                        "target_rectangle_invalid": "第一项推算矩形无效",
-                        "target_size_out_of_bounds": "第一项推算区域尺寸超出安全范围",
-                        "target_out_of_image": "第一项推算区域超出微信窗口",
-                    }.get(last.rejection_code, "第一项没有形成安全点击区域")
+                        "search_reference_missing": "搜索框原始参考区域缺失",
+                        "section_header_missing": (
+                            "没有识别到位置和相似度都合格的搜索分组标题"
+                            "（最常使用、功能、联系人或群聊）"
+                        ),
+                        "target_rectangle_invalid": "分组下方第一项的推算矩形无效",
+                        "target_size_out_of_bounds": "分组下方第一项尺寸超出安全范围",
+                        "target_out_of_image": "分组下方第一项超出微信窗口",
+                    }.get(last.rejection_code, "搜索结果没有形成安全点击区域")
                     details = {
                         "timeout": timeout,
                         "locator_rejection": last.rejection_code,
                         "locator_details": dict(last.details),
                     }
-                    if isinstance(verified_base, RelativeLocatorResult):
+                    if isinstance(snapshot_result, RelativeLocatorResult):
                         snapshot = record_recognition_snapshot(
                             image,
-                            verified_base,
-                            label="第一条搜索结果",
+                            snapshot_result,
+                            label="搜索结果分组与第一项",
                             operation=operation,
                             force=True,
                             error_message=f"{reason_text}，未形成唯一安全点击区域。",
-                            overview=draw_derived_debug_overlay(image, last),
+                            overview=draw_search_result_debug_overlay(image, last),
                             extra_metadata={
-                                "derived_rejection": last.rejection_code,
-                                "derived_details": dict(last.details),
+                                "search_result_rejection": last.rejection_code,
+                                "search_result_details": dict(last.details),
                             },
                         )
                         details.update(
@@ -1260,14 +1304,14 @@ class VisualDesktopMessageSender:
                                 "anchor_candidate_counts": {
                                     anchor_id: len(values)
                                     for anchor_id, values in (
-                                        verified_base.anchor_candidates or {}
+                                        snapshot_result.anchor_candidates or {}
                                     ).items()
                                 },
                                 "valid_combination_count": len(
-                                    verified_base.valid_combinations
+                                    snapshot_result.valid_combinations
                                 ),
                                 "distinct_target_count": len(
-                                    verified_base.distinct_combinations
+                                    snapshot_result.distinct_combinations
                                 ),
                                 "recognition_snapshot_id": (
                                     snapshot.get("id") if snapshot else None
@@ -1275,8 +1319,11 @@ class VisualDesktopMessageSender:
                             }
                         )
                     raise DesktopMessageError(
-                        "search_primary_result_unsafe",
-                        f"{reason_text}，未执行鼠标点击或盲按 Enter。",
+                        "search_result_section_unsafe",
+                        (
+                            f"{reason_text}，未执行鼠标点击，也不会回退到固定坐标、"
+                            "搜索网络结果、聊天记录或盲按 Enter。"
+                        ),
                         details=details,
                     )
                 wait_for = min(0.10, remaining)
@@ -1372,10 +1419,34 @@ class VisualDesktopMessageSender:
             "会话名称输入完成",
             lambda: self._type(self.keyboard, target_name, cancel_event),
         )
+        duration_picker = getattr(self.interaction, "choose_random_duration", None)
+        search_wait = (
+            float(
+                duration_picker(
+                    self.settings.search_result_wait_min,
+                    self.settings.search_result_wait_max,
+                )
+            )
+            if callable(duration_picker)
+            else (
+                self.settings.search_result_wait_min
+                + self.settings.search_result_wait_max
+            )
+            / 2
+        )
+        self.trace.event(
+            "wait.search_budget",
+            (
+                "本次输入会话名称后等待预算："
+                f"{search_wait:.3f} 秒（配置范围 "
+                f"{self.settings.search_result_wait_min:.3f}–"
+                f"{self.settings.search_result_wait_max:.3f} 秒）"
+            ),
+        )
         if self.settings.conversation_entry_mode == "keyboard_shortcut":
             self._wait_interruptible(
                 "wait.search_settle",
-                self.settings.settle,
+                search_wait,
                 cancel_event=cancel_event,
             )
             self._call_traced(
@@ -1401,7 +1472,7 @@ class VisualDesktopMessageSender:
         else:
             result_frame, result = self._wait_search_result(
                 timeout=self.settings.locate_timeout,
-                minimum_wait=self.settings.settle,
+                minimum_wait=search_wait,
                 cancel_event=cancel_event,
                 base=search,
                 base_image_size=frame.image.size,
@@ -1409,16 +1480,16 @@ class VisualDesktopMessageSender:
             self._call_traced(
                 "click.search_result",
                 (
-                    "使用不稳定备用方案：点击推算出的第一条搜索结果"
+                    "点击视觉识别出的最上方分组的第一条搜索结果"
                     "（包含鼠标移动、点击前停顿与点击后随机等待）"
                 ),
-                "备用鼠标点击已完成",
+                "搜索结果鼠标点击已完成",
                 lambda: self.interaction.click_rect(
                     self._screen_rect(result_frame, result.click_bounds),
                     cancel_event=cancel_event,
                 ),
             )
-            states.append("SEARCH_RESULT_MOUSE_CLICKED_UNSTABLE")
+            states.append("SEARCH_RESULT_SECTION_MOUSE_CLICKED")
         chat_frame, chat = self._wait_relative(
             self.chat_input,
             timeout=self.settings.locate_timeout,

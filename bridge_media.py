@@ -341,7 +341,9 @@ def send_media(
     *,
     timeout: float = 8.0,
     settle: float = 0.35,
-    conversation_entry_mode: str = "keyboard_shortcut",
+    search_result_wait_min: float = 0.50,
+    search_result_wait_max: float = 0.70,
+    conversation_entry_mode: str = "mouse_click_sections",
     conversation_enter_delay_min: float = 0.20,
     conversation_enter_delay_max: float = 0.50,
     soft_protection: bool = True,
@@ -407,8 +409,10 @@ def send_media(
         settings = DesktopMessageSettings(
             locate_timeout=float(timeout),
             settle=float(settle),
+            search_result_wait_min=float(search_result_wait_min),
+            search_result_wait_max=float(search_result_wait_max),
             conversation_entry_mode=str(
-                conversation_entry_mode or "keyboard_shortcut"
+                conversation_entry_mode or "mouse_click_sections"
             ).strip().lower(),
             conversation_enter_delay_min=float(conversation_enter_delay_min),
             conversation_enter_delay_max=float(conversation_enter_delay_max),

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "id": "locate_search_result_by_section_header",
+  "base_locator": "search_box_anchors.json",
+  "scan": {
+    "left_offset": 0,
+    "right_offset": 0,
+    "top_offset": 0,
+    "maximum_depth": 500,
+    "diagnostic_score_floor": 0.70,
+    "maximum_candidates_per_template": 12
+  },
+  "header_geometry": {
+    "minimum_left_offset": -2,
+    "maximum_left_offset": 18
+  },
+  "sections": [
+    {
+      "id": "frequent",
+      "label": "最常使用",
+      "templates": [
+        {
+          "path": "../templates/light/search_sections/frequent.png",
+          "minimum_score": 0.90,
+          "native_scale": 1.0,
+          "scales": [1.0]
+        }
+      ]
+    },
+    {
+      "id": "function",
+      "label": "功能",
+      "templates": [
+        {
+          "path": "../templates/light/search_sections/function.png",
+          "minimum_score": 0.90,
+          "native_scale": 1.0,
+          "scales": [1.0]
+        }
+      ]
+    },
+    {
+      "id": "contact",
+      "label": "联系人",
+      "templates": [
+        {
+          "path": "../templates/light/search_sections/contact.png",
+          "minimum_score": 0.90,
+          "native_scale": 1.0,
+          "scales": [1.0]
+        }
+      ]
+    },
+    {
+      "id": "group",
+      "label": "群聊",
+      "templates": [
+        {
+          "path": "../templates/light/search_sections/group.png",
+          "minimum_score": 0.90,
+          "native_scale": 1.0,
+          "scales": [1.0]
+        }
+      ]
+    }
+  ],
+  "result": {
+    "left_offset": 52,
+    "right_offset": 0,
+    "top_from_header_bottom": 4,
+    "bottom_from_header_bottom": 68
+  },
+  "click": {
+    "description": "在最上方分组的第一条结果正文安全区域随机点击",
+    "x_fraction": [0.15, 0.85],
+    "y_fraction": [0.20, 0.80]
+  },
+  "bounds": {
+    "minimum_width": 40,
+    "maximum_width": 500,
+    "minimum_height": 50,
+    "maximum_height": 80
+  }
+}
